@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Absensi RFID - SMANCIK</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { min-height: 100vh; background-color: #1e293b; color: #fff; }
+        .sidebar .nav-link { color: #94a3b8; margin-bottom: 5px; border-radius: 8px; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background-color: #2563eb; color: #fff; }
+        .card-custom { border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .badge-hadir { background-color: #10b981; }
+        .badge-terlambat { background-color: #f59e0b; color: #000; }
+        .badge-izin { background-color: #3b82f6; }
+        .badge-sakit { background-color: #8b5cf6; }
+        .badge-alpa { background-color: #ef4444; }
+
+        /* Style Khusus Format Cetak / Print Laporan */
+        @media print {
+            body * { visibility: hidden; }
+            #areaCetak, #areaCetak * { visibility: visible; }
+            #areaCetak { position: absolute; left: 0; top: 0; width: 100%; padding: 10px; border: none !important; box-shadow: none !important; }
+            .no-print { display: none !important; }
+            .table-bordered th, .table-bordered td { border: 1px solid #000 !important; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- CONTAINER LOGIN -->
+<div id="loginSection" class="container d-flex justify-content-center align-items-center vh-100">
+    <div class="card card-custom p-4 shadow-lg" style="width: 400px;">
+        <div class="text-center mb-4">
+            <i class="fa-solid me-2 fa-id-card-clip text-primary fa-3x mb-2"></i>
+            <h4 class="fw-bold">SMANCIK PRESENSI</h4>
+            <p class="text-muted small">Silakan login untuk mengelola sistem</p>
+        </div>
+        <form id="formLogin">
+            <div class="mb-3">
+                <label class="form-label">Username / NIP</label>
+                <input type="text" id="loginUsername" class="form-control" placeholder="Masukkan username" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Password</label>
+                <input type="password" id="loginPassword" class="form-control" placeholder="Masukkan password" required>
+            </div>
+            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">Login Masuk</button>
+        </form>
+    </div>
+</div>
+
+<!-- CONTAINER DASHBOARD UTAMA -->
+<div id="mainDashboard" class="d-none">
+    <div class="container-fluid">
+        <div class="row">
+            <!-- SIDEBAR NAVIGASI -->
+            <div class="col-md-3 col-lg-2 sidebar p-3 no-print">
+                <div class="d-flex align-items-center mb-4 px-2">
+                    <i class="fa-solid fa-school text-primary fa-2x me-2"></i>
+                    <h5 class="fw-bold mb-0 text-white">SMANCIK</h5>
+                </div>
+                <hr class="border-secondary">
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" onclick="switchMenu('dashboard')"><i class="fa-solid fa-gauge me-2"></i>Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="switchMenu('siswa')"><i class="fa-solid fa-users me-2"></i>Data Siswa</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="switchMenu('presensi')"><i class="fa-solid fa-fingerprint me-2"></i>Input Presensi</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="switchMenu('log')"><i class="fa-solid fa-clock-rotate-left me-2"></i>Log Realtime</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="switchMenu('rekap')"><i class="fa-solid fa-file-invoice me-2"></i>Rekap & Laporan</a>
+                    </li>
+                    <li class="nav-item mt-3 text-uppercase text-muted small px-2">Pengaturan</li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="switchMenu('users')"><i class="fa-solid fa-user-gear me-2"></i>Kelola User</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="switchMenu('wa')"><i class="fa-brands fa-whatsapp me-2"></i>WA Group Kelas</a>
+                    </li>
+                    <li class="nav-item mt-4">
+                        <a class="nav-link text-danger" href="#" onclick="logout()"><i class="fa-solid fa-right-from-bracket me-2"></i>Logout</a>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- KONTEN UTAMA -->
+            <div class="col-md-9 col-lg-10 p-4">
+                <!-- TOPBAR INFO USER -->
+                <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom no-print">
+                    <h4 class="fw-bold text-dark" id="judulHalaman">Dashboard Utama</h4>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-primary px-3 py-2" id="userRoleBadge">Admin</span>
+                        <span class="fw-semibold text-secondary" id="userNameLabel">Administrator</span>
+                    </div>
+                </div>
+
+                <!-- 1. HALAMAN DASHBOARD -->
+                <div id="pageDashboard" class="menu-page">
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-3">
+                            <div class="card card-custom p-3 bg-white border-start border-success border-4">
+                                <span class="text-muted small">Status Otomatis (05.30-06.30)</span>
+                                <h5 class="fw-bold text-success mt-1 mb-0">HADIR</h5>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card card-custom p-3 bg-white border-start border-warning border-4">
+                                <span class="text-muted small">Status Otomatis (06.31-08.00)</span>
+                                <h5 class="fw-bold text-warning mt-1 mb-0">TERLAMBAT</h5>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card card-custom p-3 bg-white border-start border-danger border-4">
+                                <span class="text-muted small">Lewat Jam 08.01 WIB</span>
+                                <h5 class="fw-bold text-danger mt-1 mb-0">Lapor Guru Piket</h5>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card card-custom p-3 bg-white border-start border-primary border-4">
+                                <span class="text-muted small">Sistem Database</span>
+                                <h5 class="fw-bold text-primary mt-1 mb-0">SQLite Ready</h5>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card card-custom p-4 bg-white">
+                        <h5 class="fw-bold mb-3"><i class="fa-solid fa-bullhorn text-primary me-2"></i>Panduan Jam Absensi Siswa</h5>
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item"><strong>05.30 - 06.30 WIB:</strong> Absensi dibuka, status otomatis dicatat sebagai <strong>HADIR</strong>.</li>
+                            <li class="list-group-item"><strong>06.31 - 08.00 WIB:</strong> Absensi dicatat sebagai <strong>TERLAMBAT</strong>.</li>
+                            <li class="list-group-item"><strong>Lewat 08.01 WIB:</strong> Scan otomatis ditolak. Siswa harus melapor ke Guru Piket untuk di-input manual di menu Presensi.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 2. HALAMAN DATA SISWA -->
+                <div id="pageSiswa" class="menu-page d-none">
+                    <div class="row g-4">
+                        <div class="col-md-5">
+                            <div class="card card-custom p-4 bg-white">
+                                <h5 class="fw-bold mb-3">Tambah / Edit Siswa</h5>
+                                <form id="formSiswa">
+                                    <div class="mb-3">
+                                        <label class="form-label">UID Kartu RFID</label>
+                                        <input type="text" id="siswaRfid" class="form-control" placeholder="Contoh: 04A1B2C3" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Nama Siswa</label>
+                                        <input type="text" id="siswaNama" class="form-control" placeholder="Nama Lengkap Siswa" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Kelas</label>
+                                        <input type="text" id="siswaKelas" class="form-control" placeholder="Contoh: XII IPA 1" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">No. WA Ortu (Opsional)</label>
+                                        <input type="text" id="siswaWa" class="form-control" placeholder="08123456789">
+                                    </div>
+                                    <button type="submit" class="btn btn-primary w-100"><i class="fa-solid fa-save me-2"></i>Simpan Data Siswa</button>
+                                </form>
+
+                                <hr class="my-4">
+                                <h6 class="fw-bold">Impor Data Siswa via Excel</h6>
+                                <form id="formImportSiswa">
+                                    <div class="mb-2">
+                                        <input type="file" id="fileExcelSiswa" class="form-control" accept=".xlsx, .xls" required>
+                                    </div>
+                                    <button type="submit" class="btn btn-success w-100"><i class="fa-solid fa-file-excel me-2"></i>Upload Excel Siswa</button>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="col-md-7">
+                            <div class="card card-custom p-4 bg-white">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="fw-bold mb-0">Daftar Siswa Terdaftar</h5>
+                                    <select id="filterKelasSiswa" class="form-select w-auto" onchange="loadDaftarSiswa()">
+                                        <option value="">-- Semua Kelas --</option>
+                                    </select>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-hover align-middle">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>UID Kartu</th>
+                                                <th>Nama Siswa</th>
+                                                <th>Kelas</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="tabelDaftarSiswa">
+                                            <tr><td colspan="3" class="text-center text-muted">Pilih kelas atau muat data...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. HALAMAN PRESENSI MANUAL -->
+                <div id="pagePresensi" class="menu-page d-none">
+                    <div class="row justify-content-center">
+                        <div class="col-md-6">
+                            <div class="card card-custom p-4 bg-white">
+                                <h5 class="fw-bold mb-3"><i class="fa-solid fa-fingerprint text-primary me-2"></i>Input Presensi (Scan / Manual Guru Piket)</h5>
+                                <form id="formPresensiManual">
+                                    <div class="mb-3">
+                                        <label class="form-label">UID Kartu RFID</label>
+                                        <input type="text" id="inputRfidPresensi" class="form-control form-control-lg" placeholder="Tap Kartu RFID / Ketik UID" autofocus required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Status Presensi</label>
+                                        <select id="inputStatusPresensi" class="form-select form-select-lg">
+                                            <option value="AUTO" selected>Cek Jam Otomatis (05.30-06.30 Hadir | 06.31-08.00 Terlambat)</option>
+                                            <option value="HADIR">HADIR (Pasti)</option>
+                                            <option value="TERLAMBAT">TERLAMBAT (Pasti)</option>
+                                            <option value="IZIN">IZIN</option>
+                                            <option value="SAKIT">SAKIT</option>
+                                            <option value="ALPA">ALPA</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary btn-lg w-100"><i class="fa-solid fa-paper-plane me-2"></i>Proses Presensi</button>
+                                </form>
+                                <div id="notifPresensi" class="mt-3"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. HALAMAN LOG REALTIME -->
+                <div id="pageLog" class="menu-page d-none">
+                    <div class="card card-custom p-4 bg-white">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="fw-bold mb-0"><i class="fa-solid fa-clock-rotate-left me-2"></i>Log Absensi Realtime (50 Terakhir)</h5>
+                            <button class="btn btn-outline-primary btn-sm" onclick="loadLogAbsensi()"><i class="fa-solid fa-rotate me-1"></i>Refresh Log</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-striped align-middle">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Waktu Scan</th>
+                                        <th>Nama Siswa</th>
+                                        <th>Kelas</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabelLogAbsensi">
+                                    <tr><td colspan="4" class="text-center">Memuat data log...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 5. HALAMAN REKAP & LAPORAN CETAK -->
+                <div id="pageRekap" class="menu-page d-none">
+                    <div class="card card-custom p-4 bg-white mb-4 no-print">
+                        <h5 class="fw-bold mb-3"><i class="fa-solid fa-filter me-2"></i>Filter Rekapitulasi Laporan</h5>
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-4">
+                                <label class="form-label">Pilih Kelas</label>
+                                <select id="rekapFilterKelas" class="form-select">
+                                    <option value="">-- Semua Kelas --</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Pilih Bulan</label>
+                                <input type="month" id="rekapFilterBulan" class="form-control">
+                            </div>
+                            <div class="col-md-4 d-flex gap-2">
+                                <button class="btn btn-primary w-100" onclick="loadRekapKelas()"><i class="fa-solid fa-magnifying-glass me-2"></i>Tampilkan Rekap</button>
+                                <button class="btn btn-success w-100" onclick="window.print()"><i class="fa-solid fa-print me-2"></i>Cetak Laporan</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AREA CETAK LAPORAN DENGAN KOP SURAT (DENGAN LOGO) & TANDA TANGAN -->
+                    <div id="areaCetak" class="card card-custom p-4 bg-white">
+                        
+                        <!-- KOP SURAT RESMI DENGAN LOGO -->
+                        <table style="width: 100%; border: none; margin-bottom: 0;">
+                            <tr>
+                                <td style="width: 15%; text-align: center; vertical-align: middle; border: none;">
+                                    <img src="/logo.png" alt="Logo Sekolah" style="max-height: 90px; width: auto;" onerror="this.style.display='none'">
+                                </td>
+                                <td style="width: 70%; text-align: center; vertical-align: middle; border: none;">
+                                    <h6 class="fw-bold mb-0 text-uppercase" style="font-size: 15px; letter-spacing: 0.5px;">PEMERINTAH DAERAH PROVINSI JAWA BARAT</h6>
+                                    <h5 class="fw-bold mb-0 text-uppercase" style="font-size: 17px;">DINAS PENDIDIKAN</h5>
+                                    <h2 class="fw-bold mb-0 text-uppercase" style="font-size: 24px; color: #000;">SMA NEGERI 1 CIKIDANG</h2>
+                                    <p class="fw-bold mb-0 text-uppercase" style="font-size: 13px;">TERAKREDITASI "A" AMAT BAIK</p>
+                                    <p class="mb-0" style="font-size: 12px;">Jl. Pendidikan No. 35 Cikidang Kab. Sukabumi (0266) 621215</p>
+                                    <p class="mb-0" style="font-size: 12px;">Website : sman1cikidang.sch.id &nbsp;|&nbsp; email : smancik@yahoo.co.id</p>
+                                </td>
+                                <td style="width: 15%; text-align: center; vertical-align: middle; border: none;">
+                                    <!-- Tempat penyeimbang agar judul tetap persis di tengah -->
+                                </td>
+                            </tr>
+                        </table>
+                        
+                        <!-- GARIS PEMBATAS KOP SURAT GANDA -->
+                        <div style="border-top: 3px solid #000; border-bottom: 1px solid #000; height: 3px; margin-top: 5px; margin-bottom: 20px;"></div>
+
+                        <!-- JUDUL LAPORAN -->
+                        <div class="text-center mb-4">
+                            <h5 class="fw-bold mb-1 text-uppercase text-decoration-underline">LAPORAN REKAPITULASI ABSENSI SISWA</h5>
+                            <p class="text-muted small mb-0" id="subjudulCetak">Periode Laporan Kehadiran</p>
+                        </div>
+
+                        <!-- TABEL DATA ABSENSI -->
+                        <div class="table-responsive">
+                            <table class="table table-bordered align-middle text-center" style="font-size: 13px;">
+                                <thead>
+                                    <tr style="background-color: #e2e8f0;">
+                                        <th style="width: 50px;">No</th>
+                                        <th>Nama Siswa</th>
+                                        <th style="width: 120px;">Kelas</th>
+                                        <th style="width: 80px;">Hadir</th>
+                                        <th style="width: 90px;">Terlambat</th>
+                                        <th style="width: 80px;">Izin</th>
+                                        <th style="width: 80px;">Sakit</th>
+                                        <th style="width: 80px;">Alpa</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabelRekapCetak">
+                                    <tr><td colspan="8" class="text-center text-muted">Klik "Tampilkan Rekap" untuk memuat data.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- BLOK TANDA TANGAN LAPORAN -->
+                        <div class="mt-5 pt-2" style="page-break-inside: avoid;">
+                            <table style="width: 100%; border: none; text-align: center; font-size: 13px; margin-bottom: 35px;">
+                                <tr>
+                                    <td style="width: 50%; border: none; vertical-align: top;">
+                                        <p class="mb-1">&nbsp;</p>
+                                        <p class="fw-bold mb-5">Waka Kesiswaan</p>
+                                        <br><br><br>
+                                        <p class="fw-bold text-decoration-underline mb-0">( ............................................ )</p>
+                                        <p class="small text-muted mb-0">NIP. ........................................</p>
+                                    </td>
+                                    <td style="width: 50%; border: none; vertical-align: top;">
+                                        <p class="mb-1">Cikidang, ......................... 20...</p>
+                                        <p class="fw-bold mb-5">Wali Kelas</p>
+                                        <br><br><br>
+                                        <p class="fw-bold text-decoration-underline mb-0">( ............................................ )</p>
+                                        <p class="small text-muted mb-0">NIP. ........................................</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <table style="width: 100%; border: none; text-align: center; font-size: 13px;">
+                                <tr>
+                                    <td style="border: none; vertical-align: top;">
+                                        <p class="mb-1">Mengetahui,</p>
+                                        <p class="fw-bold mb-5">Kepala SMAN 1 Cikidang</p>
+                                        <br><br><br>
+                                        <p class="fw-bold text-decoration-underline mb-0">( ............................................ )</p>
+                                        <p class="small text-muted mb-0">NIP. ........................................</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- 6. HALAMAN KELOLA USER & RESET PASSWORD -->
+                <div id="pageUsers" class="menu-page d-none">
+                    <div class="row g-4">
+                        <div class="col-md-5">
+                            <div class="card card-custom p-4 bg-white">
+                                <h5 class="fw-bold mb-3" id="formUserTitle">Tambah User / Akun Baru</h5>
+                                <form id="formUser">
+                                    <input type="hidden" id="editUserId">
+                                    <div class="mb-3">
+                                        <label class="form-label">Username / NIP</label>
+                                        <input type="text" id="userUsername" class="form-control" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label" id="labelUserPassword">Password</label>
+                                        <input type="password" id="userPassword" class="form-control" placeholder="Isi untuk reset password">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Nama Lengkap</label>
+                                        <input type="text" id="userNama" class="form-control" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Role Akses</label>
+                                        <select id="userRole" class="form-select">
+                                            <option value="guru">Guru / Wali Kelas</option>
+                                            <option value="admin">Administrator Utama</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary w-100" id="btnSimpanUser"><i class="fa-solid fa-save me-2"></i>Simpan Akun</button>
+                                    <button type="button" class="btn btn-secondary w-100 mt-2 d-none" id="btnBatalEditUser" onclick="resetFormUser()">Batal Edit</button>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="col-md-7">
+                            <div class="card card-custom p-4 bg-white">
+                                <h5 class="fw-bold mb-3">Daftar Akun Terdaftar</h5>
+                                <div class="table-responsive">
+                                    <table class="table table-hover align-middle">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Username</th>
+                                                <th>Nama Lengkap</th>
+                                                <th>Role</th>
+                                                <th>Aksi</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="tabelDaftarUsers">
+                                            <tr><td colspan="4" class="text-center">Memuat akun...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 7. HALAMAN WA GROUP -->
+                <div id="pageWa" class="menu-page d-none">
+                    <div class="card card-custom p-4 bg-white">
+                        <h5 class="fw-bold mb-3"><i class="fa-brands fa-whatsapp text-success me-2"></i>Hubungkan Kelas ke Grup WA</h5>
+                        <form id="formWaGroup" class="row g-3">
+                            <div class="col-md-5">
+                                <label class="form-label">Nama Kelas</label>
+                                <select id="waSelectKelas" class="form-select" required></select>
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label">Pilih Grup WhatsApp Target</label>
+                                <select id="waSelectGroup" class="form-select" required></select>
+                            </div>
+                            <div class="col-md-2 d-flex align-items-end">
+                                <button type="submit" class="btn btn-success w-100"><i class="fa-solid fa-link me-2"></i>Hubungkan</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap 5 JS & Script Logika Frontend -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // Global User State
+    let currentUser = null;
+
+    // Cek Session saat Halaman Dimuat
+    document.addEventListener("DOMContentLoaded", () => {
+        checkAuthSession();
+    });
+
+    async function checkAuthSession() {
+        try {
+            const res = await fetch('/api/me');
+            const data = await res.json();
+            if (data.loggedIn) {
+                currentUser = data.user;
+                showDashboard();
+            } else {
+                showLogin();
+            }
+        } catch (e) {
+            showLogin();
+        }
+    }
+
+    function showLogin() {
+        document.getElementById('loginSection').classList.remove('d-none');
+        document.getElementById('mainDashboard').classList.add('d-none');
+    }
+
+    function showDashboard() {
+        document.getElementById('loginSection').classList.add('d-none');
+        document.getElementById('mainDashboard').classList.remove('d-none');
+        document.getElementById('userNameLabel').innerText = currentUser.nama_lengkap;
+        document.getElementById('userRoleBadge').innerText = currentUser.role.toUpperCase();
+
+        // Load data awal
+        loadDropdownKelas();
+        loadLogAbsensi();
+    }
+
+    // Form Login Submit
+    document.getElementById('formLogin').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = document.getElementById('loginUsername').value;
+        const password = document.getElementById('loginPassword').value;
+
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (data.success) {
+            currentUser = data.user;
+            showDashboard();
+        } else {
+            alert(data.message);
+        }
+    });
+
+    // Logout Function
+    async function logout() {
+        await fetch('/api/logout', { method: 'POST' });
+        location.reload();
+    }
+
+    // Navigasi Menu
+    function switchMenu(menuName) {
+        document.querySelectorAll('.menu-page').forEach(el => el.classList.add('d-none'));
+        document.querySelectorAll('.sidebar .nav-link').forEach(el => el.classList.remove('active'));
+
+        const pageId = 'page' + menuName.charAt(0).toUpperCase() + menuName.slice(1);
+        document.getElementById(pageId).classList.remove('d-none');
+
+        // Ganti Judul
+        const titles = {
+            dashboard: 'Dashboard Utama',
+            siswa: 'Kelola Master Data Siswa',
+            presensi: 'Input Presensi Siswa',
+            log: 'Log Absensi Realtime',
+            rekap: 'Rekapitulasi & Cetak Laporan',
+            users: 'Manajemen Akun User',
+            wa: 'Integrasi Grup WhatsApp'
+        };
+        document.getElementById('judulHalaman').innerText = titles[menuName] || 'Dashboard';
+
+        // Trigger load data spesifik per menu
+        if (menuName === 'siswa') loadDaftarSiswa();
+        if (menuName === 'log') loadLogAbsensi();
+        if (menuName === 'rekap') loadRekapKelas();
+        if (menuName === 'users') loadDaftarUsers();
+        if (menuName === 'wa') loadWaGroupOptions();
+    }
+
+    // MASTER SISWA
+    document.getElementById('formSiswa').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const rfid_uid = document.getElementById('siswaRfid').value;
+        const nama_siswa = document.getElementById('siswaNama').value;
+        const kelas = document.getElementById('siswaKelas').value;
+        const no_wa_ortu = document.getElementById('siswaWa').value;
+
+        const res = await fetch('/api/siswa', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rfid_uid, nama_siswa, kelas, no_wa_ortu })
+        });
+        const data = await res.json();
+        alert(data.message);
+        if (data.success) {
+            document.getElementById('formSiswa').reset();
+            loadDaftarSiswa();
+            loadDropdownKelas();
+        }
+    });
+
+    document.getElementById('formImportSiswa').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fileInput = document.getElementById('fileExcelSiswa');
+        const formData = new FormData();
+        formData.append('file_excel', fileInput.files[0]);
+
+        const res = await fetch('/api/siswa/import', { method: 'POST', body: formData });
+        const data = await res.json();
+        alert(data.message);
+        if (data.success) {
+            fileInput.value = '';
+            loadDaftarSiswa();
+            loadDropdownKelas();
+        }
+    });
+
+    async function loadDaftarSiswa() {
+        const kelas = document.getElementById('filterKelasSiswa').value;
+        const res = await fetch(`/api/daftar-siswa-kelas?kelas=${encodeURIComponent(kelas)}`);
+        const data = await res.json();
+
+        const tbody = document.getElementById('tabelDaftarSiswa');
+        tbody.innerHTML = '';
+        if (data.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Belum ada data siswa.</td></tr>';
+            return;
+        }
+        data.data.forEach(s => {
+            tbody.innerHTML += `
+                <tr>
+                    <td><code>${s.rfid_uid}</code></td>
+                    <td class="fw-semibold">${s.nama_siswa}</td>
+                    <td><span class="badge bg-secondary">${s.kelas}</span></td>
+                </tr>
+            `;
+        });
+    }
+
+    // PRESENSI MANUAL
+    document.getElementById('formPresensiManual').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const rfid_uid = document.getElementById('inputRfidPresensi').value;
+        const status = document.getElementById('inputStatusPresensi').value;
+
+        const res = await fetch('/api/absensi/manual', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rfid_uid, status })
+        });
+        const data = await res.json();
+
+        const notif = document.getElementById('notifPresensi');
+        if (data.success) {
+            notif.innerHTML = `<div class="alert alert-success fw-bold"><i class="fa-solid fa-circle-check me-2"></i>${data.message}</div>`;
+            document.getElementById('inputRfidPresensi').value = '';
+        } else {
+            notif.innerHTML = `<div class="alert alert-danger fw-bold"><i class="fa-solid fa-circle-xmark me-2"></i>${data.message}</div>`;
+        }
+    });
+
+    // LOG REALTIME
+    async function loadLogAbsensi() {
+        const res = await fetch('/api/log-absensi');
+        const data = await res.json();
+        const tbody = document.getElementById('tabelLogAbsensi');
+        tbody.innerHTML = '';
+
+        if (!data.data || data.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Belum ada log presensi hari ini.</td></tr>';
+            return;
+        }
+
+        data.data.forEach(l => {
+            let badgeClass = 'badge-hadir';
+            if (l.status === 'TERLAMBAT') badgeClass = 'badge-terlambat';
+            if (l.status === 'IZIN') badgeClass = 'badge-izin';
+            if (l.status === 'SAKIT') badgeClass = 'badge-sakit';
+            if (l.status === 'ALPA') badgeClass = 'badge-alpa';
+
+            tbody.innerHTML += `
+                <tr>
+                    <td><small class="text-muted">${l.waktu_scan}</small></td>
+                    <td class="fw-bold">${l.nama_siswa}</td>
+                    <td><span class="badge bg-outline-dark">${l.kelas}</span></td>
+                    <td><span class="badge ${badgeClass} px-3 py-2">${l.status}</span></td>
+                </tr>
+            `;
+        });
+    }
+
+    // REKAP & LAPORAN
+    async function loadRekapKelas() {
+        const kelas = document.getElementById('rekapFilterKelas').value;
+        const bulan = document.getElementById('rekapFilterBulan').value;
+
+        const res = await fetch(`/api/rekap-cetak-kelas?kelas=${encodeURIComponent(kelas)}&bulan=${bulan}`);
+        const data = await res.json();
+        const tbody = document.getElementById('tabelRekapCetak');
+        tbody.innerHTML = '';
+
+        if (!data.data || data.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Data presensi tidak ditemukan.</td></tr>';
+            return;
+        }
+
+        let no = 1;
+        data.data.forEach(r => {
+            tbody.innerHTML += `
+                <tr>
+                    <td>${no++}</td>
+                    <td class="text-start fw-bold">${r.nama_siswa}</td>
+                    <td>${r.kelas}</td>
+                    <td class="fw-bold text-success">${r.total_hadir || 0}</td>
+                    <td class="fw-bold text-warning">${r.total_terlambat || 0}</td>
+                    <td class="fw-bold text-info">${r.total_izin || 0}</td>
+                    <td class="fw-bold text-purple">${r.total_sakit || 0}</td>
+                    <td class="fw-bold text-danger">${r.total_alpa || 0}</td>
+                </tr>
+            `;
+        });
+    }
+
+    // Dropdown Kelas Dynamic
+    async function loadDropdownKelas() {
+        const res = await fetch('/api/daftar-kelas');
+        const data = await res.json();
+
+        const selects = [
+            document.getElementById('filterKelasSiswa'),
+            document.getElementById('rekapFilterKelas'),
+            document.getElementById('waSelectKelas')
+        ];
+
+        selects.forEach(sel => {
+            if (!sel) return;
+            sel.innerHTML = '<option value="">-- Semua Kelas --</option>';
+            data.data.forEach(k => {
+                sel.innerHTML += `<option value="${k}">${k}</option>`;
+            });
+        });
+    }
+
+    // MANAJEMEN USER & RESET PASSWORD
+    async function loadDaftarUsers() {
+        const res = await fetch('/api/users');
+        const data = await res.json();
+        const tbody = document.getElementById('tabelDaftarUsers');
+        tbody.innerHTML = '';
+
+        data.data.forEach(u => {
+            tbody.innerHTML += `
+                <tr>
+                    <td class="fw-bold">${u.username}</td>
+                    <td>${u.nama_lengkap}</td>
+                    <td><span class="badge bg-info text-dark">${u.role}</span></td>
+                    <td>
+                        <button class="btn btn-sm btn-warning me-1" onclick="editUser(${u.id}, '${u.username}', '${u.nama_lengkap}', '${u.role}')"><i class="fa-solid fa-pen"></i></button>
+                        <button class="btn btn-sm btn-danger" onclick="hapusUser(${u.id})"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
+    function editUser(id, username, nama, role) {
+        document.getElementById('editUserId').value = id;
+        document.getElementById('userUsername').value = username;
+        document.getElementById('userPassword').value = '';
+        document.getElementById('userPassword').placeholder = 'Isi hanya jika ingin ubah password';
+        document.getElementById('userNama').value = nama;
+        document.getElementById('userRole').value = role;
+
+        document.getElementById('formUserTitle').innerText = 'Edit User / Reset Password';
+        document.getElementById('btnSimpanUser').innerHTML = '<i class="fa-solid fa-check me-2"></i>Update User';
+        document.getElementById('btnBatalEditUser').classList.remove('d-none');
+    }
+
+    function resetFormUser() {
+        document.getElementById('editUserId').value = '';
+        document.getElementById('formUser').reset();
+        document.getElementById('userPassword').placeholder = 'Masukkan password';
+        document.getElementById('formUserTitle').innerText = 'Tambah User / Akun Baru';
+        document.getElementById('btnSimpanUser').innerHTML = '<i class="fa-solid fa-save me-2"></i>Simpan Akun';
+        document.getElementById('btnBatalEditUser').classList.add('d-none');
+    }
+
+    document.getElementById('formUser').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('editUserId').value;
+        const username = document.getElementById('userUsername').value;
+        const password = document.getElementById('userPassword').value;
+        const nama_lengkap = document.getElementById('userNama').value;
+        const role = document.getElementById('userRole').value;
+
+        const payload = { username, password, nama_lengkap, role };
+        let url = '/api/users';
+        let method = 'POST';
+
+        if (id) {
+            url = `/api/users/${id}`;
+            method = 'PUT';
+        }
+
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        alert(data.message);
+        if (data.success) {
+            resetFormUser();
+            loadDaftarUsers();
+        }
+    });
+
+    async function hapusUser(id) {
+        if (!confirm('Yakin ingin menghapus akun ini?')) return;
+        const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        alert(data.message);
+        if (data.success) loadDaftarUsers();
+    }
+
+    // WA Groups
+    async function loadWaGroupOptions() {
+        const res = await fetch('/api/wa-groups');
+        const data = await res.json();
+        const sel = document.getElementById('waSelectGroup');
+        sel.innerHTML = '';
+        data.data.forEach(g => {
+            sel.innerHTML += `<option value="${g.id}">${g.name}</option>`;
+        });
+    }
+
+    document.getElementById('formWaGroup').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const nama_kelas = document.getElementById('waSelectKelas').value;
+        const wa_group_id = document.getElementById('waSelectGroup').value;
+
+        const res = await fetch('/api/kelas/set-group', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nama_kelas, wa_group_id })
+        });
+        const data = await res.json();
+        alert(data.message);
+    });
+</script>
+</body>
+</html>
