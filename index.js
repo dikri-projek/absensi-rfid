@@ -76,7 +76,7 @@ async function ensureTablesExist() {
 
 // ---------------- API ENDPOINTS ----------------
 
-// API LOGIN
+// 1. API LOGIN
 app.post('/api/login', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -97,7 +97,7 @@ app.post('/api/login', async (req, res, next) => {
   }
 });
 
-// API SISWA (GET ALL)
+// 2. API DAFTAR SISWA (GET ALL)
 app.get('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -109,7 +109,7 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// API SISWA (TAMBAH MANUAL)
+// 3. API TAMBAH SISWA MANUAL
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -130,32 +130,76 @@ app.post('/api/siswa', async (req, res, next) => {
   }
 });
 
-// API SISWA (IMPORT SEKALIGUS / BULK)
-app.post('/api/siswa/bulk', async (req, res, next) => {
+// 4. API IMPORT SISWA SEKALIGUS (/api/siswa/import DAN /api/siswa/bulk)
+async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const { dataSiswa } = req.body;
-
-    if (!Array.isArray(dataSiswa) || dataSiswa.length === 0) {
-      return res.status(400).json({ success: false, message: "Data siswa kosong atau format salah." });
+    
+    // Mendukung berbagai format body data dari frontend
+    let list = req.body.dataSiswa || req.body.siswa || req.body.data || req.body;
+    if (!Array.isArray(list)) {
+      return res.status(400).json({ success: false, message: "Format data import tidak valid." });
     }
 
-    for (const s of dataSiswa) {
-      if (s.nis && s.nama && s.kelas) {
+    for (const s of list) {
+      const nis = s.nis || s.NIS;
+      const nama = s.nama || s.Nama || s.NAMA;
+      const kelas = s.kelas || s.Kelas || s.KELAS;
+      const rfid_uid = s.rfid_uid || s.rfid || s.RFID || null;
+
+      if (nis && nama) {
         await db.execute({
           sql: "INSERT OR REPLACE INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
-          args: [s.nis, s.nama, s.kelas, s.rfid_uid || null]
+          args: [String(nis), String(nama), String(kelas || ''), rfid_uid ? String(rfid_uid) : null]
         });
       }
     }
-    return res.json({ success: true, message: `${dataSiswa.length} data siswa berhasil disimpan!` });
+    return res.json({ success: true, message: `${list.length} data siswa berhasil di-import!` });
+  } catch (error) {
+    next(error);
+  }
+}
+app.post('/api/siswa/import', handleBulkImport);
+app.post('/api/siswa/bulk', handleBulkImport);
+
+// 5. API DAFTAR KELAS (DIPAKAI UNTUK DROPDOWN FE)
+app.get('/api/daftar-kelas', async (req, res, next) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const result = await db.execute("SELECT DISTINCT kelas FROM siswa WHERE kelas IS NOT NULL AND kelas != '' ORDER BY kelas ASC");
+    const listKelas = result.rows.map(row => row.kelas);
+    return res.json({ success: true, data: listKelas, kelas: listKelas });
   } catch (error) {
     next(error);
   }
 });
 
-// API USERS (GET ALL)
+// 6. API DAFTAR SISWA PER KELAS
+app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const kelasParam = req.query.kelas;
+
+    let query = "SELECT * FROM siswa";
+    let args = [];
+
+    if (kelasParam) {
+      query += " WHERE kelas = ?";
+      args.push(kelasParam);
+    }
+    query += " ORDER BY nama ASC";
+
+    const result = await db.execute({ sql: query, args });
+    return res.json({ success: true, data: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// 7. API USERS (GET ALL & POST TAMBAH)
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -167,7 +211,6 @@ app.get('/api/users', async (req, res, next) => {
   }
 });
 
-// API USERS (TAMBAH USER)
 app.post('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -188,7 +231,7 @@ app.post('/api/users', async (req, res, next) => {
   }
 });
 
-// API TAP RFID
+// 8. API TAP RFID
 app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -220,8 +263,8 @@ app.post('/api/tap', async (req, res, next) => {
   }
 });
 
-// API REKAP ABSENSI
-app.get('/api/absensi', async (req, res, next) => {
+// 9. API REKAP & LOG ABSENSI (/api/absensi DAN /api/log-absensi)
+async function handleGetAbsensi(req, res, next) {
   try {
     await ensureTablesExist();
     const db = getDb();
@@ -230,9 +273,11 @@ app.get('/api/absensi', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+}
+app.get('/api/absensi', handleGetAbsensi);
+app.get('/api/log-absensi', handleGetAbsensi);
 
-// API PING STATUS
+// 10. API PING STATUS
 app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
 });
