@@ -4,35 +4,47 @@ const { createClient } = require('@libsql/client');
 
 const app = express();
 
-// Parsing JSON & Form Data
+// 1. CORS Middleware (Mencegah blokir request dari browser)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+// 2. Body Parser Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Konversi URL Turso ke HTTPS agar aman di Serverless Vercel
-function getTursoUrl() {
-  let url = process.env.TURSO_DATABASE_URL || '';
-  if (url.startsWith('libsql://')) {
-    url = url.replace('libsql://', 'https://');
-  }
-  return url;
-}
-
-// Inisialisasi Database Turso
+// 3. Database Client Singleton (Cached Connection)
+let dbInstance = null;
 function getDb() {
-  const url = getTursoUrl();
+  if (dbInstance) return dbInstance;
+
+  let url = process.env.TURSO_DATABASE_URL || '';
   const authToken = process.env.TURSO_AUTH_TOKEN || '';
 
   if (!url) {
     throw new Error("TURSO_DATABASE_URL belum diisi pada Environment Variables Vercel.");
   }
 
-  return createClient({ url, authToken });
+  if (url.startsWith('libsql://')) {
+    url = url.replace('libsql://', 'https://');
+  }
+
+  dbInstance = createClient({ url, authToken });
+  return dbInstance;
 }
 
-// Memastikan Tabel & Akun Admin Default Selalu Siap
+// 4. Inisialisasi Tabel Cerdas (Hanya 1x per Container)
+let isInitialized = false;
 async function ensureTablesExist() {
-  const db = getDb();
+  if (isInitialized) return;
 
+  const db = getDb();
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,7 +76,7 @@ async function ensureTablesExist() {
     );
   `);
 
-  // OTOMATIS SEED AKUN ADMIN JIKA TABEL USERS KOSONG
+  // Seed default admin jika tabel users kosong
   const userCheck = await db.execute("SELECT COUNT(*) as total FROM users");
   if (userCheck.rows[0].total === 0) {
     await db.execute({
@@ -72,20 +84,29 @@ async function ensureTablesExist() {
       args: ['admin', 'admin', 'Administrator', 'admin']
     });
   }
+
+  isInitialized = true;
+}
+
+// Helper untuk membersihkan nilai RFID (kosong "" diubah ke null)
+function sanitizeRfid(val) {
+  if (!val) return null;
+  const str = String(val).trim();
+  return str === '' ? null : str;
 }
 
 // ---------------- API ENDPOINTS ----------------
 
-// 1. API LOGIN
+// API LOGIN
 app.post('/api/login', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const { username, password } = req.body;
+    const { username, password } = req.body || {};
 
     const result = await db.execute({
       sql: "SELECT * FROM users WHERE username = ? AND password = ?",
-      args: [username || '', password || '']
+      args: [String(username || ''), String(password || '')]
     });
 
     if (result.rows.length > 0) {
@@ -97,7 +118,7 @@ app.post('/api/login', async (req, res, next) => {
   }
 });
 
-// 2. API DAFTAR SISWA (GET ALL)
+// API SISWA (GET ALL)
 app.get('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -109,12 +130,12 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 3. API TAMBAH SISWA MANUAL
+// API SISWA (TAMBAH MANUAL)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const { nis, nama, kelas, rfid_uid } = req.body;
+    const { nis, nama, kelas, rfid_uid } = req.body || {};
 
     if (!nis || !nama || !kelas) {
       return res.status(400).json({ success: false, message: "NIS, Nama, dan Kelas wajib diisi!" });
@@ -122,7 +143,7 @@ app.post('/api/siswa', async (req, res, next) => {
 
     await db.execute({
       sql: "INSERT OR REPLACE INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
-      args: [nis, nama, kelas, rfid_uid || null]
+      args: [String(nis), String(nama), String(kelas), sanitizeRfid(rfid_uid)]
     });
     return res.json({ success: true, message: "Data siswa berhasil disimpan!" });
   } catch (error) {
@@ -130,19 +151,32 @@ app.post('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 4. API IMPORT SISWA SEKALIGUS (/api/siswa/import DAN /api/siswa/bulk)
+// API IMPORT SISWA SEKALIGUS (/api/siswa/import DAN /api/siswa/bulk)
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
     const db = getDb();
     
-    // Mendukung berbagai format body data dari frontend
-    let list = req.body.dataSiswa || req.body.siswa || req.body.data || req.body;
-    if (!Array.isArray(list)) {
-      return res.status(400).json({ success: false, message: "Format data import tidak valid." });
+    const body = req.body || {};
+    let list = null;
+
+    if (Array.isArray(body)) {
+      list = body;
+    } else if (typeof body === 'object') {
+      list = body.dataSiswa || body.siswa || body.data || body.items || null;
     }
 
+    if (!list || !Array.isArray(list) || list.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Format data import tidak valid atau data kosong." 
+      });
+    }
+
+    let insertedCount = 0;
     for (const s of list) {
+      if (!s || typeof s !== 'object') continue;
+
       const nis = s.nis || s.NIS;
       const nama = s.nama || s.Nama || s.NAMA;
       const kelas = s.kelas || s.Kelas || s.KELAS;
@@ -151,11 +185,16 @@ async function handleBulkImport(req, res, next) {
       if (nis && nama) {
         await db.execute({
           sql: "INSERT OR REPLACE INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
-          args: [String(nis), String(nama), String(kelas || ''), rfid_uid ? String(rfid_uid) : null]
+          args: [String(nis), String(nama), String(kelas || ''), sanitizeRfid(rfid_uid)]
         });
+        insertedCount++;
       }
     }
-    return res.json({ success: true, message: `${list.length} data siswa berhasil di-import!` });
+
+    return res.json({ 
+      success: true, 
+      message: `${insertedCount} data siswa berhasil disimpan!` 
+    });
   } catch (error) {
     next(error);
   }
@@ -163,12 +202,14 @@ async function handleBulkImport(req, res, next) {
 app.post('/api/siswa/import', handleBulkImport);
 app.post('/api/siswa/bulk', handleBulkImport);
 
-// 5. API DAFTAR KELAS (DIPAKAI UNTUK DROPDOWN FE)
+// API DAFTAR KELAS
 app.get('/api/daftar-kelas', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const result = await db.execute("SELECT DISTINCT kelas FROM siswa WHERE kelas IS NOT NULL AND kelas != '' ORDER BY kelas ASC");
+    const result = await db.execute(
+      "SELECT DISTINCT kelas FROM siswa WHERE kelas IS NOT NULL AND kelas != '' ORDER BY kelas ASC"
+    );
     const listKelas = result.rows.map(row => row.kelas);
     return res.json({ success: true, data: listKelas, kelas: listKelas });
   } catch (error) {
@@ -176,7 +217,7 @@ app.get('/api/daftar-kelas', async (req, res, next) => {
   }
 });
 
-// 6. API DAFTAR SISWA PER KELAS
+// API DAFTAR SISWA PER KELAS
 app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -188,7 +229,7 @@ app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
 
     if (kelasParam) {
       query += " WHERE kelas = ?";
-      args.push(kelasParam);
+      args.push(String(kelasParam));
     }
     query += " ORDER BY nama ASC";
 
@@ -199,7 +240,7 @@ app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   }
 });
 
-// 7. API USERS (GET ALL & POST TAMBAH)
+// API USERS (GET ALL & TAMBAH)
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -215,7 +256,7 @@ app.post('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const { username, password, nama, role } = req.body;
+    const { username, password, nama, role } = req.body || {};
 
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Username dan Password wajib diisi!" });
@@ -223,7 +264,7 @@ app.post('/api/users', async (req, res, next) => {
 
     await db.execute({
       sql: "INSERT OR REPLACE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
-      args: [username, password, nama || username, role || 'admin']
+      args: [String(username), String(password), String(nama || username), String(role || 'admin')]
     });
     return res.json({ success: true, message: "User berhasil ditambahkan!" });
   } catch (error) {
@@ -231,20 +272,21 @@ app.post('/api/users', async (req, res, next) => {
   }
 });
 
-// 8. API TAP RFID
+// API TAP RFID
 app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const { rfid_uid } = req.body;
+    const { rfid_uid } = req.body || {};
 
-    if (!rfid_uid) {
+    const sanitizedRfid = sanitizeRfid(rfid_uid);
+    if (!sanitizedRfid) {
       return res.status(400).json({ success: false, message: "RFID UID wajib ada." });
     }
 
     const checkSiswa = await db.execute({
       sql: "SELECT * FROM siswa WHERE rfid_uid = ?",
-      args: [rfid_uid]
+      args: [sanitizedRfid]
     });
 
     if (checkSiswa.rows.length === 0) {
@@ -263,7 +305,7 @@ app.post('/api/tap', async (req, res, next) => {
   }
 });
 
-// 9. API REKAP & LOG ABSENSI (/api/absensi DAN /api/log-absensi)
+// API LOG / REKAP ABSENSI
 async function handleGetAbsensi(req, res, next) {
   try {
     await ensureTablesExist();
@@ -277,24 +319,29 @@ async function handleGetAbsensi(req, res, next) {
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 
-// 10. API PING STATUS
+// API PING STATUS
 app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
 });
 
-// Static Files Frontend
+// Fallback Folder Static Frontend
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Catch-All Endpoint API 404
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ success: false, message: `Endpoint ${req.originalUrl} tidak ditemukan.` });
+});
 
 // GLOBAL ERROR HANDLER
 app.use((err, req, res, next) => {
   console.error("Internal Error:", err.message);
   res.status(500).json({
     success: false,
-    message: err.message || "Terjadi kesalahan pada server."
+    message: err.message || "Terjadi kesalahan internal pada server."
   });
 });
 
-// Export Serverless Vercel & Run Lokal
+// EXPORT FOR VERCEL & RUN LOKAL
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => console.log(`Server aktif di port ${PORT}`));
