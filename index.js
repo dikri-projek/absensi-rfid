@@ -29,9 +29,10 @@ function getDb() {
   return createClient({ url, authToken });
 }
 
-// Memastikan Tabel Database Selalu Siap
+// Memastikan Tabel & Akun Admin Default Selalu Siap
 async function ensureTablesExist() {
   const db = getDb();
+
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,6 +42,7 @@ async function ensureTablesExist() {
       role TEXT DEFAULT 'admin'
     );
   `);
+
   await db.execute(`
     CREATE TABLE IF NOT EXISTS siswa (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,6 +52,7 @@ async function ensureTablesExist() {
       rfid_uid TEXT UNIQUE
     );
   `);
+
   await db.execute(`
     CREATE TABLE IF NOT EXISTS absensi (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +63,15 @@ async function ensureTablesExist() {
       keterangan TEXT DEFAULT 'Hadir'
     );
   `);
+
+  // OTOMATIS SEED AKUN ADMIN JIKA TABEL USERS KOSONG
+  const userCheck = await db.execute("SELECT COUNT(*) as total FROM users");
+  if (userCheck.rows[0].total === 0) {
+    await db.execute({
+      sql: "INSERT INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
+      args: ['admin', 'admin', 'Administrator', 'admin']
+    });
+  }
 }
 
 // ---------------- API ENDPOINTS ----------------
