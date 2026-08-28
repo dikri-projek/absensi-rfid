@@ -1,28 +1,13 @@
 {
   "name": "absensi-rfid",
   "version": "1.0.0",
-  "description": "",
+  "description": "Aplikasi Absensi RFID Turso Express",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "@libsql/client": "^0.17.4",
-    "axios": "^1.19.0",
-    "bcrypt": "^6.0.0",
-    "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "express-session": "^1.19.0",
-    "multer": "^2.2.0",
-    "mysql2": "^3.24.2",
-    "qrcode-terminal": "^0.12.0",
-    "sqlite3": "^6.0.1",
-    "whatsapp-web.js": "^1.34.7",
-    "xlsx": "^0.18.5"
+    "@libsql/client": "^0.6.0",
+    "express": "^4.19.2"
   }
 }

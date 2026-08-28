@@ -1,10 +1,17 @@
 const express = require('express');
 const path = require('path');
-const { createClient } = require('@libsql/client');
+
+// Menggunakan Client Web HTTP agar 100% stabil di Vercel Serverless
+let createClient;
+try {
+  createClient = require('@libsql/client/web').createClient;
+} catch (e) {
+  createClient = require('@libsql/client').createClient;
+}
 
 const app = express();
 
-// 1. CORS Middleware (Mencegah blokir request dari browser)
+// 1. CORS Middleware
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -19,27 +26,24 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 3. Database Client Singleton (Cached Connection)
-let dbInstance = null;
+// 3. Inisialisasi Database HTTP Safe
 function getDb() {
-  if (dbInstance) return dbInstance;
-
-  let url = process.env.TURSO_DATABASE_URL || '';
+  const rawUrl = process.env.TURSO_DATABASE_URL || '';
   const authToken = process.env.TURSO_AUTH_TOKEN || '';
 
-  if (!url) {
-    throw new Error("TURSO_DATABASE_URL belum diisi pada Environment Variables Vercel.");
+  if (!rawUrl || rawUrl.trim() === '') {
+    throw new Error("TURSO_DATABASE_URL belum diatur atau kosong pada Environment Variables Vercel.");
   }
 
+  let url = rawUrl.trim();
   if (url.startsWith('libsql://')) {
     url = url.replace('libsql://', 'https://');
   }
 
-  dbInstance = createClient({ url, authToken });
-  return dbInstance;
+  return createClient({ url, authToken });
 }
 
-// 4. Inisialisasi Tabel Cerdas (Hanya 1x per Container)
+// 4. Inisialisasi Tabel Cerdas (1x per Container)
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
@@ -76,7 +80,6 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Seed default admin jika tabel users kosong
   const userCheck = await db.execute("SELECT COUNT(*) as total FROM users");
   if (userCheck.rows[0].total === 0) {
     await db.execute({
@@ -88,7 +91,6 @@ async function ensureTablesExist() {
   isInitialized = true;
 }
 
-// Helper untuk membersihkan nilai RFID (kosong "" diubah ke null)
 function sanitizeRfid(val) {
   if (!val) return null;
   const str = String(val).trim();
@@ -97,7 +99,7 @@ function sanitizeRfid(val) {
 
 // ---------------- API ENDPOINTS ----------------
 
-// API LOGIN
+// 1. LOGIN
 app.post('/api/login', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -118,7 +120,7 @@ app.post('/api/login', async (req, res, next) => {
   }
 });
 
-// API SISWA (GET ALL)
+// 2. SISWA (GET ALL)
 app.get('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -130,7 +132,7 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// API SISWA (TAMBAH MANUAL)
+// 3. SISWA (TAMBAH MANUAL)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -151,12 +153,12 @@ app.post('/api/siswa', async (req, res, next) => {
   }
 });
 
-// API IMPORT SISWA SEKALIGUS (/api/siswa/import DAN /api/siswa/bulk)
+// 4. IMPORT SISWA SEKALIGUS (/api/siswa/import & /api/siswa/bulk)
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
     const db = getDb();
-    
+
     const body = req.body || {};
     let list = null;
 
@@ -167,10 +169,7 @@ async function handleBulkImport(req, res, next) {
     }
 
     if (!list || !Array.isArray(list) || list.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Format data import tidak valid atau data kosong." 
-      });
+      return res.status(400).json({ success: false, message: "Format data import tidak valid atau data kosong." });
     }
 
     let insertedCount = 0;
@@ -191,10 +190,7 @@ async function handleBulkImport(req, res, next) {
       }
     }
 
-    return res.json({ 
-      success: true, 
-      message: `${insertedCount} data siswa berhasil disimpan!` 
-    });
+    return res.json({ success: true, message: `${insertedCount} data siswa berhasil disimpan!` });
   } catch (error) {
     next(error);
   }
@@ -202,14 +198,12 @@ async function handleBulkImport(req, res, next) {
 app.post('/api/siswa/import', handleBulkImport);
 app.post('/api/siswa/bulk', handleBulkImport);
 
-// API DAFTAR KELAS
+// 5. DAFTAR KELAS
 app.get('/api/daftar-kelas', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const result = await db.execute(
-      "SELECT DISTINCT kelas FROM siswa WHERE kelas IS NOT NULL AND kelas != '' ORDER BY kelas ASC"
-    );
+    const result = await db.execute("SELECT DISTINCT kelas FROM siswa WHERE kelas IS NOT NULL AND kelas != '' ORDER BY kelas ASC");
     const listKelas = result.rows.map(row => row.kelas);
     return res.json({ success: true, data: listKelas, kelas: listKelas });
   } catch (error) {
@@ -217,7 +211,7 @@ app.get('/api/daftar-kelas', async (req, res, next) => {
   }
 });
 
-// API DAFTAR SISWA PER KELAS
+// 6. DAFTAR SISWA PER KELAS
 app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -240,7 +234,7 @@ app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   }
 });
 
-// API USERS (GET ALL & TAMBAH)
+// 7. USERS (GET ALL & POST TAMBAH)
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -272,7 +266,7 @@ app.post('/api/users', async (req, res, next) => {
   }
 });
 
-// API TAP RFID
+// 8. TAP RFID
 app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -305,7 +299,7 @@ app.post('/api/tap', async (req, res, next) => {
   }
 });
 
-// API LOG / REKAP ABSENSI
+// 9. REKAP & LOG ABSENSI
 async function handleGetAbsensi(req, res, next) {
   try {
     await ensureTablesExist();
@@ -319,12 +313,12 @@ async function handleGetAbsensi(req, res, next) {
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 
-// API PING STATUS
+// 10. API PING STATUS
 app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
 });
 
-// Fallback Folder Static Frontend
+// Serve Static Frontend
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Catch-All Endpoint API 404
@@ -332,16 +326,16 @@ app.use('/api/*', (req, res) => {
   res.status(404).json({ success: false, message: `Endpoint ${req.originalUrl} tidak ditemukan.` });
 });
 
-// GLOBAL ERROR HANDLER
+// Global Error Handler (Menangkap error DB tanpa mematikan Vercel)
 app.use((err, req, res, next) => {
-  console.error("Internal Error:", err.message);
+  console.error("Vercel Serverless Error Captured:", err.message);
   res.status(500).json({
     success: false,
     message: err.message || "Terjadi kesalahan internal pada server."
   });
 });
 
-// EXPORT FOR VERCEL & RUN LOKAL
+// Export Serverless Vercel & Run Lokal
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => console.log(`Server aktif di port ${PORT}`));
