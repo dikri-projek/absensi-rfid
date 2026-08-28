@@ -1,9 +1,13 @@
 {
-  "version": 2,
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.js"
-    }
-  ]
+  "name": "absensi-rfid",
+  "version": "1.0.0",
+  "description": "Aplikasi Absensi RFID Turso Express",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.6.0",
+    "express": "^4.19.2"
+  }
 }
