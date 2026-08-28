@@ -1,26 +1,35 @@
 const express = require('express');
-const path = require('path');
+const path = path = require('path');
 const { createClient } = require('@libsql/client');
 
 const app = express();
 
-// Middleware Parsing
+// Parsing JSON & Form Data
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Inisialisasi DB secara aman (Lazy Load agar Vercel tidak crash saat startup)
+// Konversi URL Turso ke HTTPS agar 100% kompatibel dengan Vercel Serverless
+function getTursoUrl() {
+  let url = process.env.TURSO_DATABASE_URL || '';
+  if (url.startsWith('libsql://')) {
+    url = url.replace('libsql://', 'https://');
+  }
+  return url;
+}
+
+// Inisialisasi Database Turso Aman
 function getDb() {
-  const url = process.env.TURSO_DATABASE_URL;
-  const authToken = process.env.TURSO_AUTH_TOKEN;
+  const url = getTursoUrl();
+  const authToken = process.env.TURSO_AUTH_TOKEN || '';
 
   if (!url) {
-    throw new Error("TURSO_DATABASE_URL belum diatur atau kosong di Environment Variables Vercel.");
+    throw new Error("TURSO_DATABASE_URL belum diatur pada Environment Variables Vercel.");
   }
 
   return createClient({ url, authToken });
 }
 
-// Inisialisasi Tabel Aman
+// Inisialisasi Tabel Database
 async function ensureTablesExist() {
   const db = getDb();
   await db.execute(`
@@ -216,12 +225,17 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
 });
 
-// Serve File Statis Frontend
+// CATCH-ALL API ERROR
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ success: false, message: `Endpoint ${req.originalUrl} tidak ditemukan.` });
+});
+
+// Static Files Frontend
 app.use(express.static(path.join(__dirname, 'public')));
 
-// GLOBAL ERROR HANDLER (Mencegah FUNCTION_INVOCATION_FAILED / crash 500)
+// GLOBAL ERROR HANDLER
 app.use((err, req, res, next) => {
-  console.error("Internal Error Caught:", err.message);
+  console.error("Internal Server Error:", err.message);
   res.status(500).json({
     success: false,
     message: err.message || "Terjadi kesalahan internal pada server."
