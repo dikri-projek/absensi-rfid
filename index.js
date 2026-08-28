@@ -174,4 +174,5 @@ app.listen(PORT, () => {
   console.log(`📍 URL: http://localhost:${PORT}`);
   console.log("⏱️  Aturan Jam: 05:30-06:30 (Hadir) | 06:31-08:00 (Terlambat)");
   console.log("===================================================");
+module.exports = app;
 });
