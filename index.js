@@ -1,13 +1,6 @@
 const express = require('express');
 const path = require('path');
-
-// Menggunakan Client Web HTTP agar 100% stabil di Vercel Serverless
-let createClient;
-try {
-  createClient = require('@libsql/client/web').createClient;
-} catch (e) {
-  createClient = require('@libsql/client').createClient;
-}
+const { createClient } = require('@libsql/client');
 
 const app = express();
 
@@ -26,24 +19,29 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 3. Inisialisasi Database HTTP Safe
+// 3. Inisialisasi Database HTTP Safe & Sanitasi Lengkap
 function getDb() {
-  const rawUrl = process.env.TURSO_DATABASE_URL || '';
-  const authToken = process.env.TURSO_AUTH_TOKEN || '';
+  let url = (process.env.TURSO_DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
+  let authToken = (process.env.TURSO_AUTH_TOKEN || '').trim().replace(/^["']|["']$/g, '');
 
-  if (!rawUrl || rawUrl.trim() === '') {
+  if (!url) {
     throw new Error("TURSO_DATABASE_URL belum diatur atau kosong pada Environment Variables Vercel.");
   }
 
-  let url = rawUrl.trim();
+  // Ubah libsql:// menjadi https:// untuk koneksi HTTP serverless yang stabil
   if (url.startsWith('libsql://')) {
     url = url.replace('libsql://', 'https://');
+  }
+
+  // Bersihkan trailing slash di akhir URL
+  if (url.endsWith('/')) {
+    url = url.slice(0, -1);
   }
 
   return createClient({ url, authToken });
 }
 
-// 4. Inisialisasi Tabel Cerdas (1x per Container)
+// 4. Inisialisasi Tabel Cerdas
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
@@ -80,13 +78,11 @@ async function ensureTablesExist() {
     );
   `);
 
-  const userCheck = await db.execute("SELECT COUNT(*) as total FROM users");
-  if (userCheck.rows[0].total === 0) {
-    await db.execute({
-      sql: "INSERT INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
-      args: ['admin', 'admin', 'Administrator', 'admin']
-    });
-  }
+  // Gunakan INSERT OR IGNORE agar aman dari race-condition saat cold-start
+  await db.execute({
+    sql: "INSERT OR IGNORE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
+    args: ['admin', 'admin', 'Administrator', 'admin']
+  });
 
   isInitialized = true;
 }
@@ -153,7 +149,7 @@ app.post('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 4. IMPORT SISWA SEKALIGUS (/api/siswa/import & /api/siswa/bulk)
+// 4. IMPORT SISWA SEKALIGUS
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
@@ -326,7 +322,7 @@ app.use('/api/*', (req, res) => {
   res.status(404).json({ success: false, message: `Endpoint ${req.originalUrl} tidak ditemukan.` });
 });
 
-// Global Error Handler (Menangkap error DB tanpa mematikan Vercel)
+// Global Error Handler
 app.use((err, req, res, next) => {
   console.error("Vercel Serverless Error Captured:", err.message);
   res.status(500).json({
@@ -335,7 +331,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Export Serverless Vercel & Run Lokal
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => console.log(`Server aktif di port ${PORT}`));
