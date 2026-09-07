@@ -4,7 +4,7 @@ const { createClient } = require('@libsql/client');
 
 const app = express();
 
-// 1. CORS Middleware
+// 1. CORS Middleware (Izin Akses Frontend)
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -19,7 +19,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 3. Inisialisasi Database HTTP Safe & Sanitasi Lengkap
+// 3. Inisialisasi Database Turso HTTP Safe & Sanitasi Otomatis
 function getDb() {
   let url = (process.env.TURSO_DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
   let authToken = (process.env.TURSO_AUTH_TOKEN || '').trim().replace(/^["']|["']$/g, '');
@@ -28,12 +28,12 @@ function getDb() {
     throw new Error("TURSO_DATABASE_URL belum diatur atau kosong pada Environment Variables Vercel.");
   }
 
-  // Ubah libsql:// menjadi https:// untuk koneksi HTTP serverless yang stabil
+  // Konversi protokol libsql:// ke https:// untuk stabilitas Vercel Serverless
   if (url.startsWith('libsql://')) {
     url = url.replace('libsql://', 'https://');
   }
 
-  // Bersihkan trailing slash di akhir URL
+  // Bersihkan karakter garis miring di akhir URL
   if (url.endsWith('/')) {
     url = url.slice(0, -1);
   }
@@ -41,12 +41,14 @@ function getDb() {
   return createClient({ url, authToken });
 }
 
-// 4. Inisialisasi Tabel Cerdas
+// 4. Inisialisasi Tabel & Akun Admin Default Otomatis
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
 
   const db = getDb();
+
+  // Tabel Users
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,6 +59,7 @@ async function ensureTablesExist() {
     );
   `);
 
+  // Tabel Siswa
   await db.execute(`
     CREATE TABLE IF NOT EXISTS siswa (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,6 +70,7 @@ async function ensureTablesExist() {
     );
   `);
 
+  // Tabel Absensi
   await db.execute(`
     CREATE TABLE IF NOT EXISTS absensi (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,7 +82,7 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Gunakan INSERT OR IGNORE agar aman dari race-condition saat cold-start
+  // Buat User Admin Default Jika Belum Ada
   await db.execute({
     sql: "INSERT OR IGNORE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
     args: ['admin', 'admin', 'Administrator', 'admin']
@@ -87,6 +91,7 @@ async function ensureTablesExist() {
   isInitialized = true;
 }
 
+// Helper Sanitasi Teks RFID
 function sanitizeRfid(val) {
   if (!val) return null;
   const str = String(val).trim();
@@ -95,21 +100,28 @@ function sanitizeRfid(val) {
 
 // ---------------- API ENDPOINTS ----------------
 
-// 1. LOGIN
+// 1. API LOGIN
 app.post('/api/login', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const { username, password } = req.body || {};
+
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '').trim();
+
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: "Username dan password tidak boleh kosong." });
+    }
 
     const result = await db.execute({
-      sql: "SELECT * FROM users WHERE username = ? AND password = ?",
-      args: [String(username || ''), String(password || '')]
+      sql: "SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(?) AND TRIM(password) = ?",
+      args: [username, password]
     });
 
     if (result.rows.length > 0) {
       return res.json({ success: true, message: "Login berhasil!", user: result.rows[0] });
     }
+
     return res.status(401).json({ success: false, message: "Username atau password salah." });
   } catch (error) {
     next(error);
@@ -128,7 +140,7 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 3. SISWA (TAMBAH MANUAL)
+// 3. SISWA (TAMBAH / UPDATE MANUAL)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -149,7 +161,7 @@ app.post('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 4. IMPORT SISWA SEKALIGUS
+// 4. IMPORT SISWA SEKALIGUS (/api/siswa/import & /api/siswa/bulk)
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
@@ -230,7 +242,7 @@ app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   }
 });
 
-// 7. USERS (GET ALL & POST TAMBAH)
+// 7. USERS (GET ALL & POST TAMBAH USER)
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -331,6 +343,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Export Serverless Vercel & Run Lokal
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => console.log(`Server aktif di port ${PORT}`));
