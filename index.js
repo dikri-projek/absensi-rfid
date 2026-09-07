@@ -1,10 +1,19 @@
 const express = require('express');
 const path = require('path');
-const { createClient } = require('@libsql/client');
+// Menggunakan driver HTTP murni agar 100% stabil di Vercel Serverless tanpa error migration jobs 400
+const { createClient } = require('@libsql/client/http');
 
 const app = express();
 
-// 1. CORS Middleware (Izin Akses Frontend)
+// 1. Fix Otomatis Rewrite URL dari Vercel
+app.use((req, res, next) => {
+  if (req.url.startsWith('/index.js')) {
+    req.url = req.url.replace('/index.js', '') || '/';
+  }
+  next();
+});
+
+// 2. CORS Middleware (Izin Akses Frontend)
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -15,11 +24,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// 2. Body Parser Middleware
+// 3. Body Parser Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 3. Inisialisasi Database Turso HTTP Safe & Sanitasi Otomatis
+// 4. Inisialisasi Database Turso HTTP Safe & Sanitasi URL Otomatis
 function getDb() {
   let url = (process.env.TURSO_DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
   let authToken = (process.env.TURSO_AUTH_TOKEN || '').trim().replace(/^["']|["']$/g, '');
@@ -28,12 +37,12 @@ function getDb() {
     throw new Error("TURSO_DATABASE_URL belum diatur atau kosong pada Environment Variables Vercel.");
   }
 
-  // Konversi protokol libsql:// ke https:// untuk stabilitas Vercel Serverless
+  // Konversi protokol libsql:// ke https:// untuk koneksi HTTP serverless
   if (url.startsWith('libsql://')) {
     url = url.replace('libsql://', 'https://');
   }
 
-  // Bersihkan karakter garis miring di akhir URL
+  // Bersihkan karakter garis miring di akhir URL jika ada
   if (url.endsWith('/')) {
     url = url.slice(0, -1);
   }
@@ -41,7 +50,7 @@ function getDb() {
   return createClient({ url, authToken });
 }
 
-// 4. Inisialisasi Tabel & Akun Admin Default Otomatis
+// 5. Inisialisasi Tabel & Akun Admin Default Otomatis
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
@@ -91,7 +100,7 @@ async function ensureTablesExist() {
   isInitialized = true;
 }
 
-// Helper Sanitasi Teks RFID
+// Helper Sanitasi RFID
 function sanitizeRfid(val) {
   if (!val) return null;
   const str = String(val).trim();
@@ -100,7 +109,12 @@ function sanitizeRfid(val) {
 
 // ---------------- API ENDPOINTS ----------------
 
-// 1. API LOGIN
+// 1. API PING STATUS
+app.get('/api/ping', (req, res) => {
+  res.json({ status: "OK", message: "Server aktif!" });
+});
+
+// 2. API LOGIN
 app.post('/api/login', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -128,7 +142,7 @@ app.post('/api/login', async (req, res, next) => {
   }
 });
 
-// 2. SISWA (GET ALL)
+// 3. SISWA (GET ALL)
 app.get('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -140,7 +154,7 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 3. SISWA (TAMBAH / UPDATE MANUAL)
+// 4. SISWA (TAMBAH / UPDATE MANUAL)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -161,7 +175,7 @@ app.post('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 4. IMPORT SISWA SEKALIGUS (/api/siswa/import & /api/siswa/bulk)
+// 5. IMPORT SISWA SEKALIGUS (/api/siswa/import & /api/siswa/bulk)
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
@@ -206,7 +220,7 @@ async function handleBulkImport(req, res, next) {
 app.post('/api/siswa/import', handleBulkImport);
 app.post('/api/siswa/bulk', handleBulkImport);
 
-// 5. DAFTAR KELAS
+// 6. DAFTAR KELAS
 app.get('/api/daftar-kelas', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -219,7 +233,7 @@ app.get('/api/daftar-kelas', async (req, res, next) => {
   }
 });
 
-// 6. DAFTAR SISWA PER KELAS
+// 7. DAFTAR SISWA PER KELAS
 app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -242,7 +256,7 @@ app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   }
 });
 
-// 7. USERS (GET ALL & POST TAMBAH USER)
+// 8. USERS (GET ALL & POST TAMBAH USER)
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -274,7 +288,7 @@ app.post('/api/users', async (req, res, next) => {
   }
 });
 
-// 8. TAP RFID
+// 9. TAP RFID
 app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -307,7 +321,7 @@ app.post('/api/tap', async (req, res, next) => {
   }
 });
 
-// 9. REKAP & LOG ABSENSI
+// 10. REKAP & LOG ABSENSI
 async function handleGetAbsensi(req, res, next) {
   try {
     await ensureTablesExist();
@@ -321,13 +335,14 @@ async function handleGetAbsensi(req, res, next) {
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 
-// 10. API PING STATUS
-app.get('/api/ping', (req, res) => {
-  res.json({ status: "OK", message: "Server aktif!" });
-});
-
-// Serve Static Frontend
+// Serve Frontend Static Files
 app.use(express.static(path.join(__dirname, 'public')));
+
+// SPA Fallback: arahkan halaman web non-API ke index.html
+app.get('*', (req, res, next) => {
+  if (req.originalUrl.startsWith('/api')) return next();
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // Catch-All Endpoint API 404
 app.use('/api/*', (req, res) => {
