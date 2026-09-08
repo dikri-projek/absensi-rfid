@@ -317,7 +317,7 @@ app.delete('/api/siswa/:id', async (req, res, next) => {
   }
 });
 
-// IMPORT BULK SISWA (PERBAIKAN HEADER & PENGAMAN undefined)
+// IMPORT BULK SISWA (MENDUKUNG CSV TITIK-KOMA ';', KOMA ',', & JSON)
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
@@ -328,7 +328,7 @@ async function handleBulkImport(req, res, next) {
     if (Array.isArray(body)) {
       list = body;
     } else if (typeof body === 'object' && body !== null) {
-      list = body.dataSiswa || body.siswa || body.data || body.items || null;
+      list = body.dataSiswa || body.siswa || body.data || body.items || body.rows || null;
     }
 
     if (!list || !Array.isArray(list) || list.length === 0) {
@@ -336,22 +336,34 @@ async function handleBulkImport(req, res, next) {
     }
 
     let insertedCount = 0;
-    for (const item of list) {
+    const errors = [];
+
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
       if (!item || typeof item !== 'object') continue;
 
-      // Normalisasi nama header kolom
       const cleanRow = {};
       Object.keys(item).forEach(key => {
-        const cleanKey = key.replace(/^\uFEFF/, '').trim().toLowerCase();
-        cleanRow[cleanKey] = cleanStr(item[key]);
+        // Tangani jika header/data tergabung akibat pemisah titik-koma (;)
+        if (key.includes(';')) {
+          const keys = key.split(';');
+          const values = String(item[key] || '').split(';');
+          keys.forEach((k, idx) => {
+            const cleanK = k.replace(/^\uFEFF/, '').replace(/["']/g, '').trim().toLowerCase();
+            cleanRow[cleanK] = cleanStr(values[idx]);
+          });
+        } else {
+          const cleanKey = key.replace(/^\uFEFF/, '').replace(/["']/g, '').trim().toLowerCase();
+          cleanRow[cleanKey] = cleanStr(item[key]);
+        }
       });
 
-      let nis = cleanRow.nis || cleanRow.username || cleanRow.nisn || '';
-      const nama = cleanRow.nama || cleanRow.nama_siswa || cleanRow.name || '';
-      const kelas = cleanRow.kelas || cleanRow.class || '';
-      const rfid_uid = cleanRow.rfid_uid || cleanRow.rfid || cleanRow.uid || null;
+      let nis = cleanRow.nis || cleanRow.username || cleanRow.nisn || cleanRow.nomorinduk || '';
+      const nama = cleanRow.nama || cleanRow.nama_siswa || cleanRow.namasiswa || cleanRow.name || cleanRow.namalengkap || '';
+      const kelas = cleanRow.kelas || cleanRow.class || cleanRow.rombel || '';
+      const rfid_uid = cleanRow.rfid_uid || cleanRow.rfid || cleanRow.uid || cleanRow.rfiduid || null;
 
-      // Abaikan jika baris kosong total
+      // Abaikan jika baris benar-benar kosong
       if (!nis && !nama && !kelas && !rfid_uid) continue;
 
       if (nama && kelas) {
@@ -378,7 +390,17 @@ async function handleBulkImport(req, res, next) {
           });
         }
         insertedCount++;
+      } else {
+        errors.push(`Baris ${i + 1}: Nama atau Kelas tidak terdeteksi.`);
       }
+    }
+
+    if (insertedCount === 0 && errors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Gagal impor: Nama dan Kelas wajib diisi!",
+        detail: errors
+      });
     }
 
     return res.json({ success: true, message: `${insertedCount} data siswa berhasil diimpor!` });
