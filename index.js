@@ -260,7 +260,7 @@ function parseRowItem(item) {
   return { nis, nama, kelas, rfid_uid: sanitizeRfid(rfid_uid) };
 }
 
-// 5. Inisialisasi Database
+// 5. Inisialisasi Database & Migration
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
@@ -285,19 +285,16 @@ async function ensureTablesExist() {
       nis TEXT UNIQUE,
       nama TEXT,
       kelas TEXT,
-      rfid_uid TEXT UNIQUE
+      rfid_uid TEXT,
+      uid TEXT
     );
   `);
 
-  // Auto Migration Kolom
+  // Auto Migration Kolom untuk DB Lama
   try { await db.execute("ALTER TABLE siswa ADD COLUMN rfid_uid TEXT;"); } catch(e) {}
   try { await db.execute("ALTER TABLE siswa ADD COLUMN nis TEXT;"); } catch(e) {}
   try { await db.execute("ALTER TABLE siswa ADD COLUMN kelas TEXT;"); } catch(e) {}
-
-  // Pembersihan RFID kosong
-  try {
-    await db.execute("UPDATE siswa SET rfid_uid = NULL WHERE TRIM(rfid_uid) = '' OR rfid_uid = 'null' OR rfid_uid = 'undefined';");
-  } catch(e) {}
+  try { await db.execute("ALTER TABLE siswa ADD COLUMN uid TEXT;"); } catch(e) {}
 
   // Tabel Absensi
   await db.execute(`
@@ -367,21 +364,19 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// SIMPAN / UPDATE SISWA (SINGLE MANUAL INPUT - UNIVERSAL)
+// SIMPAN / UPDATE SISWA (SINGLE MANUAL INPUT)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
     const body = parseRequestBody(req);
 
-    // 1. Coba ekstraksi secara otomatis menggunakan Parser Universal
     let parsed = parseRowItem(body);
     let nis = parsed.nis;
     let nama = parsed.nama;
     let kelas = parsed.kelas;
     let rfid_uid = parsed.rfid_uid;
 
-    // 2. Jika belum ketemu, lakukan pencarian mendalam pada seluruh properti objek
     if (!nama || !kelas) {
       const targetObj = (typeof body === 'object' && body !== null) ? (body.data || body.siswa || body) : {};
       Object.keys(targetObj).forEach(k => {
@@ -394,12 +389,10 @@ app.post('/api/siswa', async (req, res, next) => {
       });
     }
 
-    // 3. Pengecekan Akhir
     if (!nama || !kelas) {
       return res.status(400).json({
         success: false,
-        message: "Nama dan Kelas wajib diisi! Pastikan teks pada form input terisi.",
-        debug_diterima: body
+        message: "Nama dan Kelas wajib diisi! Pastikan teks pada form input terisi."
       });
     }
 
@@ -408,11 +401,13 @@ app.post('/api/siswa', async (req, res, next) => {
     }
 
     const cleanRfid = sanitizeRfid(rfid_uid);
+    // effectiveUid tidak boleh null untuk menghindari error NOT NULL constraint pada siswa.uid
+    const effectiveUid = cleanRfid || String(nis).trim() || ('UID-' + Date.now() + Math.floor(Math.random() * 1000));
 
     if (cleanRfid) {
       const checkRfid = await db.execute({
-        sql: "SELECT * FROM siswa WHERE rfid_uid = ? AND nis != ?",
-        args: [cleanRfid, nis]
+        sql: "SELECT * FROM siswa WHERE (rfid_uid = ? OR uid = ?) AND nis != ?",
+        args: [cleanRfid, cleanRfid, nis]
       });
       if (checkRfid.rows.length > 0) {
         return res.status(400).json({ success: false, message: `RFID '${cleanRfid}' sudah dipakai oleh siswa: ${checkRfid.rows[0].nama}` });
@@ -426,13 +421,13 @@ app.post('/api/siswa', async (req, res, next) => {
 
     if (checkNis.rows.length > 0) {
       await db.execute({
-        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ? WHERE nis = ?",
-        args: [nama, kelas, cleanRfid, nis]
+        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ? WHERE nis = ?",
+        args: [nama, kelas, cleanRfid, effectiveUid, nis]
       });
     } else {
       await db.execute({
-        sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
-        args: [nis, nama, kelas, cleanRfid]
+        sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
+        args: [nis, nama, kelas, cleanRfid, effectiveUid]
       });
     }
 
@@ -521,6 +516,7 @@ async function handleBulkImport(req, res, next) {
         }
 
         const cleanRfid = sanitizeRfid(rfid_uid);
+        const effectiveUid = cleanRfid || String(nis).trim() || ('UID-' + Date.now() + Math.floor(Math.random() * 1000));
 
         const checkNis = await db.execute({
           sql: "SELECT * FROM siswa WHERE nis = ?",
@@ -529,13 +525,13 @@ async function handleBulkImport(req, res, next) {
 
         if (checkNis.rows.length > 0) {
           await db.execute({
-            sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ? WHERE nis = ?",
-            args: [nama, kelas, cleanRfid, String(nis).trim()]
+            sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ? WHERE nis = ?",
+            args: [nama, kelas, cleanRfid, effectiveUid, String(nis).trim()]
           });
         } else {
           await db.execute({
-            sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
-            args: [String(nis).trim(), nama, kelas, cleanRfid]
+            sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
+            args: [String(nis).trim(), nama, kelas, cleanRfid, effectiveUid]
           });
         }
         insertedCount++;
@@ -621,14 +617,14 @@ app.post('/api/tap', async (req, res, next) => {
     const db = getDb();
     const body = parseRequestBody(req);
 
-    const sanitizedRfid = sanitizeRfid(body.rfid_uid || body.rfid || body.RFID);
+    const sanitizedRfid = sanitizeRfid(body.rfid_uid || body.rfid || body.RFID || body.uid);
     if (!sanitizedRfid) {
       return res.status(400).json({ success: false, message: "RFID UID wajib ada." });
     }
 
     const checkSiswa = await db.execute({
-      sql: "SELECT * FROM siswa WHERE rfid_uid = ?",
-      args: [sanitizedRfid]
+      sql: "SELECT * FROM siswa WHERE rfid_uid = ? OR uid = ?",
+      args: [sanitizedRfid, sanitizedRfid]
     });
 
     if (checkSiswa.rows.length === 0) {
@@ -638,7 +634,7 @@ app.post('/api/tap', async (req, res, next) => {
     const siswa = checkSiswa.rows[0];
     await db.execute({
       sql: "INSERT INTO absensi (rfid_uid, nama, kelas) VALUES (?, ?, ?)",
-      args: [siswa.rfid_uid, siswa.nama, siswa.kelas]
+      args: [siswa.rfid_uid || siswa.uid, siswa.nama, siswa.kelas]
     });
 
     return res.json({ success: true, message: `Absen Berhasil: ${siswa.nama}`, siswa });
