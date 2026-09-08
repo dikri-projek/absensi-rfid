@@ -1,7 +1,15 @@
 const express = require('express');
 const path = require('path');
+const multer = require('multer');
+const XLSX = require('xlsx');
 
 const app = express();
+
+// Konfigurasi Multer (Memory Storage agar kompatibel penuh dengan Vercel Serverless)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // Maksimal 10MB
+});
 
 // 1. CORS Middleware
 app.use((req, res, next) => {
@@ -121,11 +129,18 @@ function getDb() {
   return { execute: tursoQuery };
 }
 
-// 4. Helper Clean RFID
+// 4. Helper Clean RFID & String Safe
 function sanitizeRfid(val) {
   if (val === null || val === undefined) return null;
   const str = String(val).trim();
   if (str === '' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return null;
+  return str;
+}
+
+function cleanString(val) {
+  if (val === null || val === undefined) return '';
+  const str = String(val).trim();
+  if (str.toLowerCase() === 'undefined' || str.toLowerCase() === 'null') return '';
   return str;
 }
 
@@ -165,7 +180,7 @@ async function ensureTablesExist() {
 
   // Pembersihan RFID kosong
   try {
-    await db.execute("UPDATE siswa SET rfid_uid = NULL WHERE TRIM(rfid_uid) = '' OR rfid_uid = 'null';");
+    await db.execute("UPDATE siswa SET rfid_uid = NULL WHERE TRIM(rfid_uid) = '' OR rfid_uid = 'null' OR rfid_uid = 'undefined';");
   } catch(e) {}
 
   // Tabel Absensi
@@ -202,8 +217,8 @@ app.post('/api/login', async (req, res, next) => {
     const db = getDb();
     const body = parseRequestBody(req);
 
-    const username = String(body.username || '').trim();
-    const password = String(body.password || '').trim();
+    const username = cleanString(body.username);
+    const password = cleanString(body.password);
 
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Username dan password tidak boleh kosong." });
@@ -236,16 +251,16 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// SIMPAN / UPDATE SISWA (PERBAIKAN BESAR DI SINI)
+// SIMPAN / UPDATE SISWA (SINGLE)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
     const body = parseRequestBody(req);
 
-    let nis = String(body.nis || body.NIS || body.siswaNis || '').trim();
-    let nama = String(body.nama || body.Nama || body.siswaNama || body.name || '').trim();
-    let kelas = String(body.kelas || body.Kelas || body.siswaKelas || '').trim();
+    let nis = cleanString(body.nis || body.NIS || body.siswaNis);
+    let nama = cleanString(body.nama || body.Nama || body.siswaNama || body.name);
+    let kelas = cleanString(body.kelas || body.Kelas || body.siswaKelas);
     let rfid_uid = body.rfid_uid || body.rfid || body.RFID || body.siswaRfid || null;
 
     if (!nama || !kelas) {
@@ -282,7 +297,7 @@ app.post('/api/siswa', async (req, res, next) => {
         args: [nama, kelas, cleanRfid, nis]
       });
     } else {
-      // INSERT (URUTAN SUDAH DIPERBAIKI: nis, nama, kelas, cleanRfid)
+      // INSERT
       await db.execute({
         sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
         args: [nis, nama, kelas, cleanRfid]
@@ -314,18 +329,30 @@ app.delete('/api/siswa/:id', async (req, res, next) => {
   }
 });
 
-// IMPORT EXCEL BULK SISWA
+// IMPORT EXCEL / CSV / JSON BULK SISWA (DUKUNGAN GANDA: FILE UPLOAD & JSON BODY)
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const body = parseRequestBody(req);
 
     let list = null;
-    if (Array.isArray(body)) {
-      list = body;
-    } else if (typeof body === 'object') {
-      list = body.dataSiswa || body.siswa || body.data || body.items || null;
+
+    // 1. Cek Apakah Ada File Unggahan (Excel / CSV) via Multipart Form-Data
+    const uploadedFile = (req.files && req.files.length > 0) ? req.files[0] : req.file;
+
+    if (uploadedFile && uploadedFile.buffer) {
+      const workbook = XLSX.read(uploadedFile.buffer, { type: 'buffer' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      list = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
+    } else {
+      // 2. Fallback Jika Mengirim Array/Object JSON
+      const body = parseRequestBody(req);
+      if (Array.isArray(body)) {
+        list = body;
+      } else if (typeof body === 'object' && body !== null) {
+        list = body.dataSiswa || body.siswa || body.data || body.items || null;
+      }
     }
 
     if (!list || !Array.isArray(list) || list.length === 0) {
@@ -333,48 +360,83 @@ async function handleBulkImport(req, res, next) {
     }
 
     let insertedCount = 0;
-    for (const s of list) {
-      if (!s || typeof s !== 'object') continue;
+    const errors = [];
 
-      let nis = s.nis || s.NIS || s.Nis || '';
-      const nama = String(s.nama || s.Nama || s.NAMA || '').trim();
-      const kelas = String(s.kelas || s.Kelas || s.KELAS || '').trim();
-      const rfid_uid = s.rfid_uid || s.rfid || s.RFID || s.Rfid || null;
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      if (!item || typeof item !== 'object') continue;
 
-      if (nama && kelas) {
-        if (!nis || String(nis).trim() === '') {
-          nis = 'NIS-' + Math.floor(100000 + Math.random() * 900000);
-        }
+      // Normalisasi Header Kolom (Pembersihan BOM UTF-8, Lowercase, & Trim Spasi)
+      const cleanRow = {};
+      Object.keys(item).forEach(key => {
+        const cleanKey = key.replace(/^\uFEFF/, '').trim().toLowerCase();
+        cleanRow[cleanKey] = cleanString(item[key]);
+      });
 
-        const cleanRfid = sanitizeRfid(rfid_uid);
+      // Mapping Kolom Fleksibel
+      let nis = cleanRow.nis || cleanRow.username || cleanRow.nisn || '';
+      const nama = cleanRow.nama || cleanRow.nama_siswa || cleanRow.name || '';
+      const kelas = cleanRow.kelas || cleanRow.class || '';
+      const rfid_uid = cleanRow.rfid_uid || cleanRow.rfid || cleanRow.uid || null;
 
-        const checkNis = await db.execute({
-          sql: "SELECT * FROM siswa WHERE nis = ?",
-          args: [String(nis).trim()]
-        });
+      // Skip Jika Seluruh Kolom Utama Kosong (Mengatasi Baris Blank di Akhir File Excel)
+      if (!nis && !nama && !kelas && !rfid_uid) continue;
 
-        if (checkNis.rows.length > 0) {
-          await db.execute({
-            sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ? WHERE nis = ?",
-            args: [nama, kelas, cleanRfid, String(nis).trim()]
-          });
-        } else {
-          await db.execute({
-            sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
-            args: [String(nis).trim(), nama, kelas, cleanRfid]
-          });
-        }
-        insertedCount++;
+      // Validasi Nama & Kelas
+      if (!nama || !kelas) {
+        errors.push(`Baris ${i + 2}: Nama dan Kelas wajib diisi!`);
+        continue;
       }
+
+      // Generate Auto NIS Jika Kosong
+      if (!nis) {
+        nis = 'NIS-' + Math.floor(100000 + Math.random() * 900000);
+      }
+
+      const cleanRfid = sanitizeRfid(rfid_uid);
+
+      // Upsert Ke Database
+      const checkNis = await db.execute({
+        sql: "SELECT * FROM siswa WHERE nis = ?",
+        args: [String(nis).trim()]
+      });
+
+      if (checkNis.rows.length > 0) {
+        await db.execute({
+          sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ? WHERE nis = ?",
+          args: [nama, kelas, cleanRfid, String(nis).trim()]
+        });
+      } else {
+        await db.execute({
+          sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
+          args: [String(nis).trim(), nama, kelas, cleanRfid]
+        });
+      }
+      insertedCount++;
     }
 
-    return res.json({ success: true, message: `${insertedCount} data siswa berhasil diimpor!` });
+    if (insertedCount === 0 && errors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Gagal mengimpor data siswa.",
+        errors: errors
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `${insertedCount} data siswa berhasil diimpor!`,
+      total: insertedCount
+    });
+
   } catch (error) {
     return res.status(500).json({ success: false, message: `Gagal import: ${error.message}` });
   }
 }
-app.post('/api/siswa/import', handleBulkImport);
-app.post('/api/siswa/bulk', handleBulkImport);
+
+// Handler Import Menggunakan upload.any() Agar Fleksibel Menangkap File Apapun Field-nya
+app.post('/api/siswa/import', upload.any(), handleBulkImport);
+app.post('/api/siswa/bulk', upload.any(), handleBulkImport);
 
 // GET LIST USERS
 app.get('/api/users', async (req, res, next) => {
@@ -388,17 +450,17 @@ app.get('/api/users', async (req, res, next) => {
   }
 });
 
-// TAMBAH USER
+// TAMBAH USER (PENGAMAN AGAR TIDAK TERJADI 'adminundefined')
 app.post('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
     const body = parseRequestBody(req);
 
-    const username = String(body.username || '').trim();
-    const password = String(body.password || '').trim();
-    const nama = String(body.nama || username).trim();
-    const role = String(body.role || 'admin').trim();
+    const username = cleanString(body.username);
+    const password = cleanString(body.password);
+    let nama = cleanString(body.nama) || username || 'Administrator';
+    const role = cleanString(body.role) || 'admin';
 
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Username dan Password wajib diisi!" });
@@ -432,7 +494,7 @@ app.delete('/api/users/:id', async (req, res, next) => {
   }
 });
 
-// TAP RFID SIMULASI
+// TAP RFID SIMULASI / HARDWARE
 app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
