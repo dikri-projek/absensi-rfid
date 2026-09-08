@@ -1,6 +1,5 @@
 const express = require('express');
 const path = require('path');
-const { createClient } = require('@libsql/client/http');
 
 const app = express();
 
@@ -19,24 +18,89 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 3. Inisialisasi Database Turso HTTP Safe
-function getDb() {
-  let url = (process.env.TURSO_DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
-  let authToken = (process.env.TURSO_AUTH_TOKEN || '').trim().replace(/^["']|["']$/g, '');
+// 3. Native Turso HTTP Driver (Bypass @libsql/client SDK untuk menghindari error migration)
+async function tursoQuery(stmt) {
+  let sql = "";
+  let args = [];
 
-  if (!url) {
-    throw new Error("TURSO_DATABASE_URL belum diatur atau kosong pada Environment Variables Vercel.");
+  if (typeof stmt === 'string') {
+    sql = stmt;
+  } else if (typeof stmt === 'object' && stmt !== null) {
+    sql = stmt.sql || '';
+    args = stmt.args || [];
+  }
+
+  let url = (process.env.TURSO_DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
+  let token = (process.env.TURSO_AUTH_TOKEN || '').trim().replace(/^["']|["']$/g, '');
+
+  if (!url || !token) {
+    throw new Error("TURSO_DATABASE_URL atau TURSO_AUTH_TOKEN belum diatur pada Vercel Settings.");
   }
 
   if (url.startsWith('libsql://')) {
     url = url.replace('libsql://', 'https://');
   }
-
   if (url.endsWith('/')) {
     url = url.slice(0, -1);
   }
 
-  return createClient({ url, authToken });
+  // Format argumen ke Hrana API format
+  const formattedArgs = args.map(arg => {
+    if (arg === null || arg === undefined) return { type: "null" };
+    if (typeof arg === "number") {
+      return Number.isInteger(arg) ? { type: "integer", value: String(arg) } : { type: "float", value: arg };
+    }
+    return { type: "text", value: String(arg) };
+  });
+
+  const res = await fetch(`${url}/v2/pipeline`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      requests: [
+        {
+          type: 'execute',
+          stmt: { sql, args: formattedArgs }
+        },
+        { type: 'close' }
+      ]
+    })
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Turso HTTP Error (${res.status}): ${errorText}`);
+  }
+
+  const json = await res.json();
+  const firstResult = json.results?.[0];
+
+  if (firstResult?.type === 'error') {
+    throw new Error(firstResult.error?.message || "Gagal mengeksekusi query Turso.");
+  }
+
+  const execResult = firstResult?.response?.result;
+  if (!execResult) return { rows: [] };
+
+  const cols = execResult.cols ? execResult.cols.map(c => c.name) : [];
+  const rows = (execResult.rows || []).map(row => {
+    const rowObj = {};
+    row.forEach((cell, i) => {
+      rowObj[cols[i]] = cell?.value !== undefined ? cell.value : null;
+    });
+    return rowObj;
+  });
+
+  return { rows };
+}
+
+function getDb() {
+  return {
+    execute: tursoQuery
+  };
 }
 
 // 4. Inisialisasi Tabel & User Admin
