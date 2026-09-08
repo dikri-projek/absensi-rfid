@@ -181,7 +181,7 @@
         </main>
     </div>
 
-    <!-- MODAL POPUP INPUT SISWA MANUAL (LENGKAP KOLOM NIS) -->
+    <!-- MODAL POPUP INPUT SISWA MANUAL -->
     <div id="modalSiswa" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
             <div class="flex justify-between items-center mb-4">
@@ -190,12 +190,11 @@
             </div>
 
             <form id="formSiswa" class="space-y-4">
-                <!-- KOLOM INPUT NIS TERSEDIA LENGKAP -->
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">
                         NIS (Nomor Induk Siswa)
                     </label>
-                    <input type="text" id="siswaNis" placeholder="Contoh: 20241001 (Opsional)"
+                    <input type="text" id="siswaNis" name="nis" placeholder="Contoh: 20241001 (Opsional)"
                         class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
                 </div>
 
@@ -203,7 +202,7 @@
                     <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">
                         Nama Lengkap <span class="text-red-500">*</span>
                     </label>
-                    <input type="text" id="siswaNama" required placeholder="Contoh: Ahmad Subagja"
+                    <input type="text" id="siswaNama" name="nama" required placeholder="Contoh: Ahmad Subagja"
                         class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
                 </div>
 
@@ -211,7 +210,7 @@
                     <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">
                         Kelas <span class="text-red-500">*</span>
                     </label>
-                    <input type="text" id="siswaKelas" required placeholder="Contoh: XII IPA 1"
+                    <input type="text" id="siswaKelas" name="kelas" required placeholder="Contoh: XII IPA 1"
                         class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
                 </div>
 
@@ -219,7 +218,7 @@
                     <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">
                         UID Kartu RFID (Opsional)
                     </label>
-                    <input type="text" id="siswaRfid" placeholder="Contoh: A1B2C3D4"
+                    <input type="text" id="siswaRfid" name="rfid_uid" placeholder="Contoh: A1B2C3D4"
                         class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none">
                 </div>
 
@@ -237,7 +236,7 @@
         </div>
     </div>
 
-    <!-- LOGIKA JAVASCRIPT FRONTEND UTUH -->
+    <!-- LOGIKA JAVASCRIPT FRONTEND -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -246,7 +245,7 @@
             }
         });
 
-        // 1. LOGIN LOGIC
+        // 1. LOGIN
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const btn = document.getElementById('btnLogin');
@@ -293,7 +292,7 @@
             loadAbsensi();
         }
 
-        // 2. TAB LOGIC
+        // 2. TAB NAVIGASI
         function switchTab(tabName) {
             ['rekap', 'siswa', 'tap'].forEach(t => {
                 document.getElementById(`tab${t.charAt(0).toUpperCase() + t.slice(1)}`).classList.add('hidden');
@@ -412,7 +411,7 @@
             }
         });
 
-        // 6. IMPORT EXCEL DENGAN SHEETJS (XLSX)
+        // 6. IMPORT EXCEL DENGAN SHEETJS
         function processExcelImport(fileInput) {
             const file = fileInput.files[0];
             if (!file) return;
@@ -425,7 +424,6 @@
                     const sheetName = workbook.SheetNames[0];
                     const sheet = workbook.Sheets[sheetName];
 
-                    // Konversi sheet Excel menjadi JSON Array
                     const jsonRows = XLSX.utils.sheet_to_json(sheet);
 
                     if (!jsonRows || jsonRows.length === 0) {
@@ -433,7 +431,6 @@
                         return;
                     }
 
-                    // Kirim JSON Array ke endpoint backend
                     const res = await fetch('/api/siswa/import', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },

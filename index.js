@@ -18,7 +18,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 3. Native Turso HTTP Driver (Bypass SDK untuk mencegah error migration/WebSocket)
+// 3. Native Turso HTTP Driver
 async function tursoQuery(stmt) {
   let sql = "";
   let args = [];
@@ -163,8 +163,13 @@ app.post('/api/login', async (req, res, next) => {
     await ensureTablesExist();
     const db = getDb();
 
-    const username = String(req.body?.username || '').trim();
-    const password = String(req.body?.password || '').trim();
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch(e){}
+    }
+
+    const username = String(body.username || '').trim();
+    const password = String(body.password || '').trim();
 
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Username dan password tidak boleh kosong." });
@@ -196,25 +201,37 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// TAMBAH / UPDATE SISWA (DILENGKAPI AUTO-GENERATE NIS JIKA KOSONG)
+// TAMBAH / UPDATE SISWA (DENGAN PENANGANAN LENGKAP NAMA & KELAS)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    let { nis, nama, kelas, rfid_uid } = req.body || {};
+
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch(e){}
+    }
+
+    let nis = body.nis || body.NIS || body.siswaNis || '';
+    let nama = body.nama || body.Nama || body.siswaNama || '';
+    let kelas = body.kelas || body.Kelas || body.siswaKelas || '';
+    let rfid_uid = body.rfid_uid || body.rfid || body.RFID || body.siswaRfid || null;
+
+    nis = String(nis).trim();
+    nama = String(nama).trim();
+    kelas = String(kelas).trim();
 
     if (!nama || !kelas) {
       return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi!" });
     }
 
-    // Jika NIS tidak dikirim dari frontend, buat NIS otomatis
-    if (!nis || String(nis).trim() === '') {
+    if (!nis) {
       nis = 'NIS-' + Date.now().toString().slice(-6);
     }
 
     await db.execute({
       sql: "INSERT OR REPLACE INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
-      args: [String(nis), String(nama), String(kelas), sanitizeRfid(rfid_uid)]
+      args: [nis, nama, kelas, sanitizeRfid(rfid_uid)]
     });
     return res.json({ success: true, message: "Data siswa berhasil disimpan!" });
   } catch (error) {
@@ -222,13 +239,17 @@ app.post('/api/siswa', async (req, res, next) => {
   }
 });
 
-// IMPORT EXCEL / BULK SISWA
+// IMPORT BULK SISWA (EXCEL)
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
     const db = getDb();
 
-    const body = req.body || {};
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch(e){}
+    }
+
     let list = null;
 
     if (Array.isArray(body)) {
@@ -246,8 +267,8 @@ async function handleBulkImport(req, res, next) {
       if (!s || typeof s !== 'object') continue;
 
       let nis = s.nis || s.NIS || s.Nis || '';
-      const nama = s.nama || s.Nama || s.NAMA || '';
-      const kelas = s.kelas || s.Kelas || s.KELAS || '';
+      const nama = String(s.nama || s.Nama || s.NAMA || '').trim();
+      const kelas = String(s.kelas || s.Kelas || s.KELAS || '').trim();
       const rfid_uid = s.rfid_uid || s.rfid || s.RFID || s.Rfid || null;
 
       if (nama) {
@@ -257,7 +278,7 @@ async function handleBulkImport(req, res, next) {
 
         await db.execute({
           sql: "INSERT OR REPLACE INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
-          args: [String(nis), String(nama), String(kelas), sanitizeRfid(rfid_uid)]
+          args: [String(nis).trim(), nama, kelas, sanitizeRfid(rfid_uid)]
         });
         insertedCount++;
       }
@@ -320,7 +341,12 @@ app.post('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const { username, password, nama, role } = req.body || {};
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch(e){}
+    }
+
+    const { username, password, nama, role } = body;
 
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Username dan Password wajib diisi!" });
@@ -328,7 +354,7 @@ app.post('/api/users', async (req, res, next) => {
 
     await db.execute({
       sql: "INSERT OR REPLACE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
-      args: [String(username), String(password), String(nama || username), String(role || 'admin')]
+      args: [String(username).trim(), String(password).trim(), String(nama || username).trim(), String(role || 'admin').trim()]
     });
     return res.json({ success: true, message: "User berhasil ditambahkan!" });
   } catch (error) {
@@ -340,9 +366,13 @@ app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const { rfid_uid } = req.body || {};
 
-    const sanitizedRfid = sanitizeRfid(rfid_uid);
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch(e){}
+    }
+
+    const sanitizedRfid = sanitizeRfid(body.rfid_uid || body.rfid || body.RFID);
     if (!sanitizedRfid) {
       return res.status(400).json({ success: false, message: "RFID UID wajib ada." });
     }
@@ -381,7 +411,7 @@ async function handleGetAbsensi(req, res, next) {
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 
-// Static Routing Frontend & SPA Fallback
+// Static Routing & Fallback
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.all('/api/*', (req, res) => {
