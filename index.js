@@ -18,7 +18,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Helper Parsing Body Teraman untuk Vercel
+// Helper Parsing Body Teraman
 function parseRequestBody(req) {
   let body = req.body;
   if (!body) return {};
@@ -39,7 +39,7 @@ function parseRequestBody(req) {
   return body || {};
 }
 
-// Helper Ekstraksi Nilai Kolom Turso secara Aman
+// Helper Ekstraksi Nilai Kolom Turso
 function extractCellValue(cell) {
   if (cell === null || cell === undefined) return null;
   if (typeof cell === 'object') {
@@ -146,7 +146,7 @@ function cleanStr(val) {
   return str;
 }
 
-// 5. Inisialisasi Database & Migrasi
+// 5. Inisialisasi Database & Migrasi Tabel
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
@@ -235,7 +235,7 @@ app.post('/api/login', async (req, res, next) => {
   }
 });
 
-// GET LIST USERS
+// MANAJEMEN USERS
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -247,7 +247,6 @@ app.get('/api/users', async (req, res, next) => {
   }
 });
 
-// TAMBAH USER
 app.post('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -273,7 +272,6 @@ app.post('/api/users', async (req, res, next) => {
   }
 });
 
-// HAPUS USER
 app.delete('/api/users/:id', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -291,7 +289,59 @@ app.delete('/api/users/:id', async (req, res, next) => {
   }
 });
 
-// GET LIST SISWA (Lengkap dengan Kompatibilitas Tampilan)
+// GET DAFTAR KELAS (UNTUK DROPDOWN & PRINTOUT REKAP)
+async function handleGetKelas(req, res, next) {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+
+    let dbKelas = [];
+    try {
+      const resSiswa = await db.execute("SELECT DISTINCT kelas FROM siswa WHERE kelas IS NOT NULL AND TRIM(kelas) != ''");
+      const resAbsensi = await db.execute("SELECT DISTINCT kelas FROM absensi WHERE kelas IS NOT NULL AND TRIM(kelas) != ''");
+      
+      const k1 = (resSiswa.rows || []).map(r => r.kelas);
+      const k2 = (resAbsensi.rows || []).map(r => r.kelas);
+      dbKelas = [...k1, ...k2].filter(Boolean);
+    } catch (e) {
+      console.error("Error fetching kelas DB:", e.message);
+    }
+
+    const defaultKelas = [
+      'X IPA 1', 'X IPA 2', 'X IPS 1', 'X IPS 2',
+      'XI IPA 1', 'XI IPA 2', 'XI IPS 1', 'XI IPS 2',
+      'XII IPA 1', 'XII IPA 2', 'XII IPS 1', 'XII IPS 2'
+    ];
+
+    const uniqueKelas = Array.from(new Set([...dbKelas, ...defaultKelas])).sort();
+
+    // Format Opsi Kelas (Support Format Object dan Array String)
+    if (req.query.format === 'string' || req.query.raw === 'true') {
+      return res.json(uniqueKelas);
+    }
+
+    const formattedObjects = uniqueKelas.map((k, index) => ({
+      id: index + 1,
+      id_kelas: index + 1,
+      nama: k,
+      nama_kelas: k,
+      kelas: k,
+      value: k,
+      label: k
+    }));
+
+    return res.json(formattedObjects);
+  } catch (error) {
+    next(error);
+  }
+}
+
+app.get('/api/kelas', handleGetKelas);
+app.get('/api/kelas-list', handleGetKelas);
+app.get('/api/siswa/kelas', handleGetKelas);
+app.get('/api/absensi/kelas', handleGetKelas);
+
+// GET SEMUA SISWA
 app.get('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -299,7 +349,7 @@ app.get('/api/siswa', async (req, res, next) => {
     
     let result;
     try {
-      result = await db.execute("SELECT * FROM siswa ORDER BY id DESC");
+      result = await db.execute("SELECT *, rowid FROM siswa ORDER BY id DESC");
     } catch(e) {
       result = await db.execute("SELECT * FROM siswa");
     }
@@ -309,19 +359,19 @@ app.get('/api/siswa', async (req, res, next) => {
       const nama = s.nama || s.nama_siswa || s.name || 'Tanpa Nama';
       const kelas = s.kelas || s.kelas_siswa || s.rombel || '-';
       const rfid_uid = s.rfid_uid || s.rfid || s.uid || '';
-      const nis = s.nis || s.id || '';
-      const id = s.id || nis || Math.floor(Math.random() * 10000);
+      const nis = s.nis || s.id || s.rowid || '';
+      const id = s.id || s.rowid || nis;
 
       return {
-        id: id,
-        nis: nis,
-        nama: nama,
+        id,
+        nis,
+        nama,
         nama_siswa: nama,
         name: nama,
-        kelas: kelas,
+        kelas,
         kelas_siswa: kelas,
         rombel: kelas,
-        rfid_uid: rfid_uid,
+        rfid_uid,
         rfid: rfid_uid,
         uid: rfid_uid
       };
@@ -333,17 +383,59 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// SIMPAN / UPDATE SISWA
-app.post('/api/siswa', async (req, res, next) => {
+// GET DETAIL SISWA BY ID
+app.get('/api/siswa/:id', async (req, res, next) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const { id } = req.params;
+
+    const result = await db.execute({
+      sql: "SELECT *, rowid FROM siswa WHERE id = ? OR nis = ? OR rowid = ? OR rfid_uid = ? OR uid = ?",
+      args: [id, id, id, id, id]
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Siswa tidak ditemukan." });
+    }
+
+    const s = result.rows[0];
+    const nama = s.nama || s.nama_siswa || s.name || '';
+    const kelas = s.kelas || s.kelas_siswa || s.rombel || '';
+    const rfid_uid = s.rfid_uid || s.rfid || s.uid || '';
+    const nis = s.nis || s.id || s.rowid || '';
+    const studentId = s.id || s.rowid || nis;
+
+    return res.json({
+      id: studentId,
+      nis,
+      nama,
+      nama_siswa: nama,
+      name: nama,
+      kelas,
+      kelas_siswa: kelas,
+      rombel: kelas,
+      rfid_uid,
+      rfid: rfid_uid,
+      uid: rfid_uid
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// SIMPAN & EDIT SISWA (MENDUKUNG POST & PUT)
+async function handleSaveOrUpdateSiswa(req, res, next) {
   try {
     await ensureTablesExist();
     const db = getDb();
     const body = parseRequestBody(req);
 
+    const targetId = req.params.id || body.id || body.siswa_id;
     let nama = cleanStr(body.nama || body.nama_siswa || body.name);
     let kelas = cleanStr(body.kelas || body.kelas_siswa || body.rombel);
     let rfid_uid = sanitizeRfid(body.rfid_uid || body.rfid || body.uid);
-    let nis = cleanStr(body.nis || body.id);
+    let nis = cleanStr(body.nis || body.id || targetId);
 
     if (!nama || !kelas) {
       return res.status(400).json({
@@ -353,9 +445,18 @@ app.post('/api/siswa', async (req, res, next) => {
     }
 
     let existingSiswa = null;
-    if (rfid_uid) {
+
+    if (targetId) {
+      const checkId = await db.execute({
+        sql: "SELECT *, rowid FROM siswa WHERE id = ? OR nis = ? OR rowid = ?",
+        args: [targetId, targetId, targetId]
+      });
+      if (checkId.rows.length > 0) existingSiswa = checkId.rows[0];
+    }
+
+    if (!existingSiswa && rfid_uid) {
       const checkRfid = await db.execute({
-        sql: "SELECT * FROM siswa WHERE rfid_uid = ? OR uid = ?",
+        sql: "SELECT *, rowid FROM siswa WHERE rfid_uid = ? OR uid = ?",
         args: [rfid_uid, rfid_uid]
       });
       if (checkRfid.rows.length > 0) existingSiswa = checkRfid.rows[0];
@@ -363,23 +464,30 @@ app.post('/api/siswa', async (req, res, next) => {
 
     if (!existingSiswa && nis) {
       const checkNis = await db.execute({
-        sql: "SELECT * FROM siswa WHERE nis = ? OR id = ?",
+        sql: "SELECT *, rowid FROM siswa WHERE nis = ? OR id = ?",
         args: [nis, nis]
       });
       if (checkNis.rows.length > 0) existingSiswa = checkNis.rows[0];
     }
 
     if (existingSiswa) {
-      const targetNis = existingSiswa.nis || nis || ('NIS-' + Date.now());
-      const targetId = existingSiswa.id || targetNis;
+      // UPDATE SISWA
+      const updateId = existingSiswa.id || existingSiswa.rowid || existingSiswa.nis;
+      const finalNis = nis || existingSiswa.nis || ('NIS-' + Date.now());
+      const finalRfid = rfid_uid || existingSiswa.rfid_uid || existingSiswa.uid || finalNis;
 
       await db.execute({
-        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ? WHERE id = ? OR nis = ?",
-        args: [nama, kelas, rfid_uid, rfid_uid || targetNis, targetId, targetNis]
+        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ? OR rowid = ? OR nis = ?",
+        args: [nama, kelas, finalRfid, finalRfid, finalNis, updateId, updateId, finalNis]
       });
 
-      return res.json({ success: true, message: `Data siswa '${nama}' berhasil diperbarui!` });
+      return res.json({
+        success: true,
+        message: `Data siswa '${nama}' berhasil diperbarui!`,
+        siswa: { id: updateId, nis: finalNis, nama, kelas, rfid_uid: finalRfid }
+      });
     } else {
+      // INSERT SISWA BARU
       if (!nis) {
         nis = 'NIS-' + Date.now().toString().slice(-6);
       }
@@ -390,13 +498,24 @@ app.post('/api/siswa', async (req, res, next) => {
         args: [nis, nama, kelas, rfid_uid, cleanRfid]
       });
 
-      return res.json({ success: true, message: `Siswa baru '${nama}' berhasil ditambahkan!` });
+      return res.json({
+        success: true,
+        message: `Siswa baru '${nama}' berhasil ditambahkan!`,
+        siswa: { nis, nama, kelas, rfid_uid: cleanRfid }
+      });
     }
   } catch (error) {
-    console.error("Error SIMPAN SISWA:", error.message);
-    return res.status(500).json({ success: false, message: `Gagal menyimpan siswa: ${error.message}` });
+    console.error("Error Simpan/Edit Siswa:", error.message);
+    return res.status(500).json({ success: false, message: `Gagal menyimpan data siswa: ${error.message}` });
   }
-});
+}
+
+app.post('/api/siswa', handleSaveOrUpdateSiswa);
+app.put('/api/siswa', handleSaveOrUpdateSiswa);
+app.post('/api/siswa/:id', handleSaveOrUpdateSiswa);
+app.put('/api/siswa/:id', handleSaveOrUpdateSiswa);
+app.post('/api/siswa/edit', handleSaveOrUpdateSiswa);
+app.post('/api/siswa/update', handleSaveOrUpdateSiswa);
 
 // HAPUS SISWA
 app.delete('/api/siswa/:id', async (req, res, next) => {
@@ -406,8 +525,8 @@ app.delete('/api/siswa/:id', async (req, res, next) => {
     const { id } = req.params;
 
     await db.execute({
-      sql: "DELETE FROM siswa WHERE id = ? OR nis = ?",
-      args: [id, id]
+      sql: "DELETE FROM siswa WHERE id = ? OR nis = ? OR rowid = ?",
+      args: [id, id, id]
     });
 
     return res.json({ success: true, message: "Siswa berhasil dihapus!" });
@@ -476,8 +595,8 @@ async function handleAbsensiManual(req, res, next) {
     const targetIdentifier = body.siswa_id || body.id || body.nis || rfid_uid;
     if ((!nama || !kelas) && targetIdentifier) {
       const checkSiswa = await db.execute({
-        sql: "SELECT * FROM siswa WHERE id = ? OR nis = ? OR rfid_uid = ? OR uid = ?",
-        args: [targetIdentifier, targetIdentifier, targetIdentifier, targetIdentifier]
+        sql: "SELECT *, rowid FROM siswa WHERE id = ? OR nis = ? OR rfid_uid = ? OR uid = ? OR rowid = ?",
+        args: [targetIdentifier, targetIdentifier, targetIdentifier, targetIdentifier, targetIdentifier]
       });
       if (checkSiswa.rows.length > 0) {
         const s = checkSiswa.rows[0];
@@ -505,19 +624,62 @@ async function handleAbsensiManual(req, res, next) {
 app.post('/api/absensi/manual', handleAbsensiManual);
 app.post('/api/manual-absensi', handleAbsensiManual);
 
-// GET REKAP ABSENSI
+// GET REKAP ABSENSI (MENDUKUNG FILTER PRINTOUT & LAPORAN)
 async function handleGetAbsensi(req, res, next) {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const result = await db.execute("SELECT * FROM absensi ORDER BY waktu DESC");
-    return res.json(result.rows);
+
+    const kelasFilter = req.query.kelas || req.query.kelas_siswa || '';
+    const tanggalFilter = req.query.tanggal || req.query.date || '';
+
+    let sql = "SELECT * FROM absensi";
+    let args = [];
+    let conditions = [];
+
+    if (kelasFilter && kelasFilter.toLowerCase() !== 'semua' && kelasFilter.toLowerCase() !== 'all') {
+      conditions.push("(kelas = ? OR kelas LIKE ?)");
+      args.push(kelasFilter, `%${kelasFilter}%`);
+    }
+
+    if (tanggalFilter) {
+      conditions.push("waktu LIKE ?");
+      args.push(`%${tanggalFilter}%`);
+    }
+
+    if (conditions.length > 0) {
+      sql += " WHERE " + conditions.join(" AND ");
+    }
+
+    sql += " ORDER BY waktu DESC, id DESC";
+
+    const result = await db.execute({ sql, args });
+    const rows = (result.rows || []).map(a => ({
+      id: a.id || a.rowid,
+      rfid_uid: a.rfid_uid || a.rfid || a.uid || '',
+      rfid: a.rfid_uid || a.rfid || a.uid || '',
+      uid: a.rfid_uid || a.rfid || a.uid || '',
+      nama: a.nama || a.nama_siswa || '',
+      nama_siswa: a.nama || a.nama_siswa || '',
+      kelas: a.kelas || a.kelas_siswa || '-',
+      kelas_siswa: a.kelas || a.kelas_siswa || '-',
+      waktu: a.waktu || '',
+      tanggal: a.waktu ? String(a.waktu).split(' ')[0] : '',
+      keterangan: a.keterangan || 'Hadir',
+      status: a.keterangan || 'Hadir'
+    }));
+
+    return res.json(rows);
   } catch (error) {
     next(error);
   }
 }
+
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
+app.get('/api/absensi/rekap', handleGetAbsensi);
+app.get('/api/rekap', handleGetAbsensi);
+app.get('/api/rekap-absensi', handleGetAbsensi);
 
 // HAPUS ABSENSI
 app.delete('/api/absensi/:id', async (req, res, next) => {
