@@ -143,23 +143,25 @@ function cleanStr(val) {
   return str;
 }
 
-// 4. Inisialisasi Tabel Database
+// 4. Inisialisasi Tabel & Akun Default Admin
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
 
   const db = getDb();
 
+  // Tabel Users
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT,
+      username TEXT UNIQUE,
       password TEXT,
       nama TEXT,
       role TEXT DEFAULT 'admin'
     );
   `);
 
+  // Tabel Siswa
   await db.execute(`
     CREATE TABLE IF NOT EXISTS siswa (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,6 +173,7 @@ async function ensureTablesExist() {
     );
   `);
 
+  // Tabel Absensi
   await db.execute(`
     CREATE TABLE IF NOT EXISTS absensi (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -182,6 +185,19 @@ async function ensureTablesExist() {
     );
   `);
 
+  // Buat User Admin Default jika belum ada
+  try {
+    const checkUser = await db.execute("SELECT * FROM users WHERE username = 'admin'");
+    if (!checkUser.rows || checkUser.rows.length === 0) {
+      await db.execute({
+        sql: "INSERT INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
+        args: ['admin', 'admin123', 'Administrator Utama', 'admin']
+      });
+    }
+  } catch (err) {
+    console.log("Info user admin check/insert:", err.message);
+  }
+
   isInitialized = true;
 }
 
@@ -191,7 +207,48 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
 });
 
-// REPAIR DATABASE (DROPS & RECREATES TABEL SISWA SECARA BERSIH)
+// API LOGIN USER / ADMIN
+app.post('/api/login', async (req, res) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const body = parseRequestBody(req);
+
+    const username = cleanStr(body.username || body.user);
+    const password = cleanStr(body.password || body.pass);
+
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: "Username dan Password wajib diisi!" });
+    }
+
+    const result = await db.execute({
+      sql: "SELECT * FROM users WHERE username = ? AND password = ?",
+      args: [username, password]
+    });
+
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(401).json({ success: false, message: "Username atau Password salah!" });
+    }
+
+    const user = result.rows[0];
+
+    return res.json({
+      success: true,
+      message: "Login Berhasil!",
+      user: {
+        id: user.id,
+        username: user.username,
+        nama: user.nama || 'Admin',
+        role: user.role || 'admin'
+      }
+    });
+  } catch (error) {
+    console.error("Login Error:", error.message);
+    return res.status(500).json({ success: false, message: "Gagal login: " + error.message });
+  }
+});
+
+// REPAIR DATABASE (DROPS & RECREATES TABEL SISWA DAN USERS)
 app.post('/api/repair-db', async (req, res) => {
   try {
     const db = getDb();
@@ -206,14 +263,31 @@ app.post('/api/repair-db', async (req, res) => {
         uid TEXT
       );
     `);
+
+    // Reset user admin juga
+    await db.execute("DROP TABLE IF EXISTS users");
+    await db.execute(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        nama TEXT,
+        role TEXT DEFAULT 'admin'
+      );
+    `);
+    await db.execute({
+      sql: "INSERT INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
+      args: ['admin', 'admin123', 'Administrator Utama', 'admin']
+    });
+
     isInitialized = true;
-    return res.json({ success: true, message: "Tabel siswa berhasil direparasi & di-reset bersih!" });
+    return res.json({ success: true, message: "Database direparasi! User default: admin | Password: admin123" });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Gagal reparasi: " + error.message });
   }
 });
 
-// GET DAFTAR PILIHAN KELAS
+// GET DAFTAR KELAS
 app.get('/api/kelas', async (req, res) => {
   try {
     await ensureTablesExist();
@@ -270,7 +344,7 @@ app.get('/api/siswa', async (req, res) => {
   }
 });
 
-// SIMPAN & EDIT SISWA
+// SIMPAN / EDIT SISWA
 async function handleSaveOrUpdateSiswa(req, res) {
   try {
     await ensureTablesExist();
@@ -293,7 +367,6 @@ async function handleSaveOrUpdateSiswa(req, res) {
     const finalNis = nis || ('NIS-' + Date.now().toString().slice(-6));
     const finalRfid = rfid_uid || finalNis;
 
-    // 1. Cek apakah mode Edit (ada targetId)
     if (targetId) {
       await db.execute({
         sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ? OR nis = ?",
@@ -302,14 +375,12 @@ async function handleSaveOrUpdateSiswa(req, res) {
       return res.json({ success: true, message: `Data '${nama}' berhasil diperbarui!` });
     }
 
-    // 2. Mode Tambah Baru
     try {
       await db.execute({
         sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
         args: [finalNis, nama, kelas, finalRfid, finalRfid]
       });
     } catch (insertErr) {
-      // Fallback jika terjadi kendala bentrok data
       await db.execute({
         sql: "UPDATE siswa SET nama = ?, kelas = ? WHERE rfid_uid = ? OR uid = ? OR nis = ?",
         args: [nama, kelas, finalRfid, finalRfid, finalNis]
@@ -328,7 +399,7 @@ app.put('/api/siswa', handleSaveOrUpdateSiswa);
 app.post('/api/siswa/:id', handleSaveOrUpdateSiswa);
 app.put('/api/siswa/:id', handleSaveOrUpdateSiswa);
 
-// SEED SAMPLE SISWA (ISI 4 CONTOH DATA)
+// SEED CONTOH DATA SISWA
 app.post('/api/siswa/seed', async (req, res) => {
   try {
     await ensureTablesExist();
@@ -411,7 +482,7 @@ app.post('/api/tap', async (req, res) => {
       args: [sanitizedRfid, sanitizedRfid, sanitizedRfid]
     });
 
-    if (checkSiswa.rows.length === 0) {
+    if (!checkSiswa.rows || checkSiswa.rows.length === 0) {
       return res.status(444).json({ success: false, message: `Kartu RFID '${sanitizedRfid}' belum terdaftar!` });
     }
 
@@ -427,7 +498,7 @@ app.post('/api/tap', async (req, res) => {
   }
 });
 
-// STATIC SERVING
+// SERVE STATIC
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('*', (req, res) => {
