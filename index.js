@@ -39,6 +39,16 @@ function parseRequestBody(req) {
   return body || {};
 }
 
+// Helper Ekstraksi Nilai Kolom Turso secara Aman
+function extractCellValue(cell) {
+  if (cell === null || cell === undefined) return null;
+  if (typeof cell === 'object') {
+    if (cell.type === 'null') return null;
+    if ('value' in cell) return cell.value;
+  }
+  return cell;
+}
+
 // 3. Native Turso HTTP Driver
 async function tursoQuery(stmt) {
   let sql = "";
@@ -109,8 +119,14 @@ async function tursoQuery(stmt) {
   const rows = (execResult.rows || []).map(row => {
     const rowObj = {};
     row.forEach((cell, i) => {
-      rowObj[cols[i]] = cell?.value !== undefined ? cell.value : null;
+      rowObj[cols[i]] = extractCellValue(cell);
     });
+
+    // Menambahkan alias agar kompatibel dengan tabel UI Anda
+    rowObj.rfid = rowObj.rfid || rowObj.rfid_uid || rowObj.uid || '';
+    rowObj.rfid_uid = rowObj.rfid_uid || rowObj.rfid || rowObj.uid || '';
+    rowObj.uid = rowObj.uid || rowObj.rfid_uid || rowObj.rfid || '';
+
     return rowObj;
   });
 
@@ -121,7 +137,7 @@ function getDb() {
   return { execute: tursoQuery };
 }
 
-// 4. Helper Clean RFID & String
+// 4. Helper Pembersih String & RFID
 function sanitizeRfid(val) {
   if (val === null || val === undefined) return null;
   const str = String(val).trim();
@@ -136,46 +152,24 @@ function cleanStr(val) {
   return str;
 }
 
-// Helper Deteksi Kata Kunci Header
 function cleanKeyName(str) {
   return String(str || '').replace(/^\uFEFF/, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 }
 
 function isNamaKey(k) {
-  return k.includes('nama') || k.includes('name') || k.includes('siswa') || k.includes('fullname') || k.includes('lengkap') || k.includes('murid');
+  return k.includes('nama') || k.includes('name') || k.includes('siswa') || k.includes('fullname') || k.includes('lengkap');
 }
 
 function isKelasKey(k) {
-  return k.includes('kelas') || k.includes('class') || k.includes('rombel') || k.includes('tingkat') || k.includes('kls') || k.includes('jurusan');
+  return k.includes('kelas') || k.includes('class') || k.includes('rombel') || k.includes('tingkat') || k.includes('kls');
 }
 
 function isNisKey(k) {
-  return k.includes('nis') || k.includes('nisn') || k.includes('username') || k.includes('nomor') || k.includes('noinduk') || k.includes('id');
+  return k.includes('nis') || k.includes('nisn') || k.includes('username') || k.includes('nomor') || k.includes('id');
 }
 
 function isRfidKey(k) {
   return k.includes('rfid') || k.includes('uid') || k.includes('tag') || k.includes('kartu');
-}
-
-function assignFromCols(cols) {
-  const filtered = cols.map(c => cleanStr(c)).filter(c => c !== '');
-  let nis = '', nama = '', kelas = '', rfid_uid = null;
-
-  if (filtered.length >= 4) {
-    nis = filtered[0];
-    nama = filtered[1];
-    kelas = filtered[2];
-    rfid_uid = filtered[3];
-  } else if (filtered.length === 3) {
-    nis = filtered[0];
-    nama = filtered[1];
-    kelas = filtered[2];
-  } else if (filtered.length === 2) {
-    nama = filtered[0];
-    kelas = filtered[1];
-  }
-
-  return { nis, nama, kelas, rfid_uid: sanitizeRfid(rfid_uid) };
 }
 
 function parseRowItem(item) {
@@ -186,88 +180,29 @@ function parseRowItem(item) {
 
   if (!item) return { nis, nama, kelas, rfid_uid };
 
-  // Format 1: String "101;Ahmad;10A;1234"
-  if (typeof item === 'string') {
-    const delim = item.includes(';') ? ';' : (item.includes('\t') ? '\t' : ',');
-    const cols = item.split(delim).map(c => c.replace(/^["']|["']$/g, ''));
-    return assignFromCols(cols);
-  }
-
-  // Format 2: Array ["101", "Ahmad", "10A", "1234"]
-  if (Array.isArray(item)) {
-    return assignFromCols(item);
-  }
-
-  // Format 3: Object / JSON
-  if (typeof item === 'object') {
-    const keys = Object.keys(item);
-    const vals = Object.values(item);
-
-    // Kasus 3a: Header & Data Tergabung dalam Titik-Koma
-    if (keys.length === 1 && (keys[0].includes(';') || keys[0].includes(','))) {
-      const delim = keys[0].includes(';') ? ';' : ',';
-      const hCols = keys[0].split(delim).map(h => cleanKeyName(h));
-      const vCols = String(vals[0] || '').split(delim).map(v => v.replace(/^["']|["']$/g, ''));
-
-      for (let i = 0; i < hCols.length; i++) {
-        const hk = hCols[i];
-        const val = cleanStr(vCols[i]);
-        if (isRfidKey(hk)) rfid_uid = rfid_uid || val;
-        else if (isNamaKey(hk)) nama = nama || val;
-        else if (isKelasKey(hk)) kelas = kelas || val;
-        else if (isNisKey(hk)) nis = nis || val;
-      }
-
-      if (!nama || !kelas) {
-        return assignFromCols(vCols);
-      }
-      return { nis, nama, kelas, rfid_uid: sanitizeRfid(rfid_uid) };
-    }
-
-    // Kasus 3b: Object Key-Value Biasa
-    const cleanObj = {};
-    keys.forEach(k => {
-      cleanObj[cleanKeyName(k)] = cleanStr(item[k]);
-    });
-
-    Object.keys(cleanObj).forEach(k => {
-      const val = cleanObj[k];
+  if (typeof item === 'object' && item !== null) {
+    Object.keys(item).forEach(k => {
+      const cleanK = cleanKeyName(k);
+      const val = cleanStr(item[k]);
       if (!val) return;
 
-      if (isRfidKey(k)) {
-        rfid_uid = rfid_uid || val;
-      } else if (isNamaKey(k)) {
-        nama = nama || val;
-      } else if (isKelasKey(k)) {
-        kelas = kelas || val;
-      } else if (isNisKey(k)) {
-        nis = nis || val;
-      }
+      if (isNamaKey(cleanK) && !nama) nama = val;
+      else if (isKelasKey(cleanK) && !kelas) kelas = val;
+      else if (isRfidKey(cleanK) && !rfid_uid) rfid_uid = val;
+      else if (isNisKey(cleanK) && !nis) nis = val;
     });
-
-    // Kasus 3c: Fallback ke urutan posisi jika nama/kelas belum ketemu
-    if (!nama || !kelas) {
-      const nonObjVals = vals.map(v => cleanStr(v)).filter(v => v !== '');
-      if (nonObjVals.length === 1 && (nonObjVals[0].includes(';') || nonObjVals[0].includes(','))) {
-        const delim = nonObjVals[0].includes(';') ? ';' : ',';
-        const cols = nonObjVals[0].split(delim).map(c => c.replace(/^["']|["']$/g, ''));
-        return assignFromCols(cols);
-      }
-      return assignFromCols(nonObjVals);
-    }
   }
 
   return { nis, nama, kelas, rfid_uid: sanitizeRfid(rfid_uid) };
 }
 
-// 5. Inisialisasi Database & Migration
+// 5. Inisialisasi Database & Migrasi
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
 
   const db = getDb();
 
-  // Tabel Users
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -278,7 +213,6 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Tabel Siswa
   await db.execute(`
     CREATE TABLE IF NOT EXISTS siswa (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -290,13 +224,11 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Auto Migration Kolom untuk DB Lama
   try { await db.execute("ALTER TABLE siswa ADD COLUMN rfid_uid TEXT;"); } catch(e) {}
   try { await db.execute("ALTER TABLE siswa ADD COLUMN nis TEXT;"); } catch(e) {}
   try { await db.execute("ALTER TABLE siswa ADD COLUMN kelas TEXT;"); } catch(e) {}
   try { await db.execute("ALTER TABLE siswa ADD COLUMN uid TEXT;"); } catch(e) {}
 
-  // Tabel Absensi
   await db.execute(`
     CREATE TABLE IF NOT EXISTS absensi (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -308,7 +240,6 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Akun Admin Default
   await db.execute({
     sql: "INSERT OR IGNORE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
     args: ['admin', 'admin', 'Administrator', 'admin']
@@ -364,29 +295,26 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// SIMPAN / UPDATE SISWA (SINGLE MANUAL INPUT)
+// SIMPAN / UPDATE SISWA (FORM INPUT MANUAL UI)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
     const body = parseRequestBody(req);
 
-    let parsed = parseRowItem(body);
-    let nis = parsed.nis;
-    let nama = parsed.nama;
-    let kelas = parsed.kelas;
-    let rfid_uid = parsed.rfid_uid;
+    // Tangkap data langsung dari properti JSON/Form
+    let nama = cleanStr(body.nama || body.nama_siswa || body.namasiswa || body.name);
+    let kelas = cleanStr(body.kelas || body.kelas_siswa || body.class || body.rombel);
+    let rfid_uid = sanitizeRfid(body.rfid_uid || body.rfid || body.uid || body.RFID || body.tag);
+    let nis = cleanStr(body.nis || body.nisn || body.id);
 
+    // Fallback jika tidak ditemukan
     if (!nama || !kelas) {
-      const targetObj = (typeof body === 'object' && body !== null) ? (body.data || body.siswa || body) : {};
-      Object.keys(targetObj).forEach(k => {
-        const cleanK = cleanKeyName(k);
-        const val = cleanStr(targetObj[k]);
-        if (isNamaKey(cleanK) && !nama) nama = val;
-        if (isKelasKey(cleanK) && !kelas) kelas = val;
-        if (isNisKey(cleanK) && !nis) nis = val;
-        if (isRfidKey(cleanK) && !rfid_uid) rfid_uid = val;
-      });
+      const parsed = parseRowItem(body);
+      if (!nama) nama = parsed.nama;
+      if (!kelas) kelas = parsed.kelas;
+      if (!rfid_uid) rfid_uid = parsed.rfid_uid;
+      if (!nis) nis = parsed.nis;
     }
 
     if (!nama || !kelas) {
@@ -401,8 +329,7 @@ app.post('/api/siswa', async (req, res, next) => {
     }
 
     const cleanRfid = sanitizeRfid(rfid_uid);
-    // effectiveUid tidak boleh null untuk menghindari error NOT NULL constraint pada siswa.uid
-    const effectiveUid = cleanRfid || String(nis).trim() || ('UID-' + Date.now() + Math.floor(Math.random() * 1000));
+    const effectiveUid = cleanRfid || String(nis).trim();
 
     if (cleanRfid) {
       const checkRfid = await db.execute({
@@ -456,188 +383,46 @@ app.delete('/api/siswa/:id', async (req, res, next) => {
   }
 });
 
-// IMPORT BULK SISWA
-async function handleBulkImport(req, res, next) {
-  try {
-    await ensureTablesExist();
-    const db = getDb();
-    const body = parseRequestBody(req);
-
-    let list = null;
-
-    if (Array.isArray(body)) {
-      list = body;
-    } else if (typeof body === 'string') {
-      list = body.split(/\r?\n/).filter(line => line.trim() !== '');
-    } else if (typeof body === 'object' && body !== null) {
-      for (const k of Object.keys(body)) {
-        if (Array.isArray(body[k])) {
-          list = body[k];
-          break;
-        }
-      }
-      if (!list) {
-        for (const k of Object.keys(body)) {
-          if (typeof body[k] === 'string' && (body[k].includes('\n') || body[k].includes(';') || body[k].includes(','))) {
-            list = body[k].split(/\r?\n/).filter(line => line.trim() !== '');
-            break;
-          }
-        }
-      }
-      if (!list && Object.keys(body).length > 0) {
-        list = [body];
-      }
-    }
-
-    if (!list || !Array.isArray(list) || list.length === 0) {
-      return res.status(400).json({ success: false, message: "Format data import tidak valid atau data kosong." });
-    }
-
-    let insertedCount = 0;
-
-    for (let i = 0; i < list.length; i++) {
-      const item = list[i];
-      let { nis, nama, kelas, rfid_uid } = parseRowItem(item);
-
-      const lowerNama = String(nama).trim().toLowerCase();
-      const lowerKelas = String(kelas).trim().toLowerCase();
-      if (
-        lowerNama === 'nama' || lowerNama === 'nama_siswa' || lowerNama === 'namasiswa' || lowerNama === 'name' || lowerNama === 'fullname' ||
-        lowerKelas === 'kelas' || lowerKelas === 'class' || lowerKelas === 'rombel'
-      ) {
-        continue;
-      }
-
-      if (!nis && !nama && !kelas && !rfid_uid) continue;
-
-      if (nama && kelas) {
-        if (!nis) {
-          nis = 'NIS-' + Math.floor(100000 + Math.random() * 900000);
-        }
-
-        const cleanRfid = sanitizeRfid(rfid_uid);
-        const effectiveUid = cleanRfid || String(nis).trim() || ('UID-' + Date.now() + Math.floor(Math.random() * 1000));
-
-        const checkNis = await db.execute({
-          sql: "SELECT * FROM siswa WHERE nis = ?",
-          args: [String(nis).trim()]
-        });
-
-        if (checkNis.rows.length > 0) {
-          await db.execute({
-            sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ? WHERE nis = ?",
-            args: [nama, kelas, cleanRfid, effectiveUid, String(nis).trim()]
-          });
-        } else {
-          await db.execute({
-            sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
-            args: [String(nis).trim(), nama, kelas, cleanRfid, effectiveUid]
-          });
-        }
-        insertedCount++;
-      }
-    }
-
-    if (insertedCount === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Gagal impor: Data siswa tidak dapat terbaca. Pastikan file berisi data Nama dan Kelas.",
-        sample: list.slice(0, 2)
-      });
-    }
-
-    return res.json({ success: true, message: `${insertedCount} data siswa berhasil diimpor!` });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: `Gagal import: ${error.message}` });
-  }
-}
-app.post('/api/siswa/import', handleBulkImport);
-app.post('/api/siswa/bulk', handleBulkImport);
-
-// GET LIST USERS
-app.get('/api/users', async (req, res, next) => {
-  try {
-    await ensureTablesExist();
-    const db = getDb();
-    const result = await db.execute("SELECT id, username, nama, role FROM users ORDER BY id DESC");
-    return res.json({ success: true, data: result.rows });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// TAMBAH USER
-app.post('/api/users', async (req, res, next) => {
-  try {
-    await ensureTablesExist();
-    const db = getDb();
-    const body = parseRequestBody(req);
-
-    const username = cleanStr(body.username);
-    const password = cleanStr(body.password);
-    const nama = cleanStr(body.nama) || username || 'Administrator';
-    const role = cleanStr(body.role) || 'admin';
-
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: "Username dan Password wajib diisi!" });
-    }
-
-    await db.execute({
-      sql: "INSERT OR REPLACE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
-      args: [username, password, nama, role]
-    });
-    return res.json({ success: true, message: "User berhasil disimpan!" });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// HAPUS USER
-app.delete('/api/users/:id', async (req, res, next) => {
-  try {
-    await ensureTablesExist();
-    const db = getDb();
-    const { id } = req.params;
-
-    await db.execute({
-      sql: "DELETE FROM users WHERE id = ?",
-      args: [id]
-    });
-
-    return res.json({ success: true, message: "User berhasil dihapus!" });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// TAP RFID
+// TAP RFID PRESENSI
 app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
     const body = parseRequestBody(req);
 
-    const sanitizedRfid = sanitizeRfid(body.rfid_uid || body.rfid || body.RFID || body.uid);
+    const sanitizedRfid = sanitizeRfid(body.rfid_uid || body.rfid || body.RFID || body.uid || body.tag);
     if (!sanitizedRfid) {
       return res.status(400).json({ success: false, message: "RFID UID wajib ada." });
     }
 
     const checkSiswa = await db.execute({
-      sql: "SELECT * FROM siswa WHERE rfid_uid = ? OR uid = ?",
-      args: [sanitizedRfid, sanitizedRfid]
+      sql: "SELECT * FROM siswa WHERE rfid_uid = ? OR uid = ? OR nis = ?",
+      args: [sanitizedRfid, sanitizedRfid, sanitizedRfid]
     });
 
     if (checkSiswa.rows.length === 0) {
-      return res.status(444).json({ success: false, message: "Kartu RFID belum terdaftar!" });
+      return res.status(444).json({ success: false, message: `Kartu RFID '${sanitizedRfid}' belum terdaftar!` });
     }
 
     const siswa = checkSiswa.rows[0];
+    const studentRfid = siswa.rfid_uid || siswa.uid || sanitizedRfid;
+    const studentNama = siswa.nama || 'Siswa';
+    const studentKelas = siswa.kelas || '-';
+
     await db.execute({
       sql: "INSERT INTO absensi (rfid_uid, nama, kelas) VALUES (?, ?, ?)",
-      args: [siswa.rfid_uid || siswa.uid, siswa.nama, siswa.kelas]
+      args: [studentRfid, studentNama, studentKelas]
     });
 
-    return res.json({ success: true, message: `Absen Berhasil: ${siswa.nama}`, siswa });
+    return res.json({
+      success: true,
+      message: `Absen Berhasil: ${studentNama}`,
+      siswa: {
+        ...siswa,
+        rfid: studentRfid,
+        rfid_uid: studentRfid
+      }
+    });
   } catch (error) {
     next(error);
   }
