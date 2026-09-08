@@ -47,7 +47,7 @@ function extractCellValue(cell) {
   return cell;
 }
 
-// 3. Turso Database Driver
+// 3. Turso HTTP Driver
 async function tursoQuery(stmt) {
   let sql = "";
   let args = [];
@@ -248,7 +248,7 @@ app.get('/api/siswa', async (req, res) => {
   }
 });
 
-// SIMPAN & EDIT SISWA
+// SIMPAN & EDIT SISWA (MENGGUNAKAN INSERT OR REPLACE AGAR TIDAK MENTOK UNIQUE CONSTRAINT)
 async function handleSaveOrUpdateSiswa(req, res) {
   try {
     await ensureTablesExist();
@@ -261,23 +261,58 @@ async function handleSaveOrUpdateSiswa(req, res) {
 
     const nama = cleanStr(body.nama || body.nama_siswa || body.name);
     const kelas = cleanStr(body.kelas || body.kelas_siswa || body.rombel);
-    const rfid_uid = sanitizeRfid(body.rfid_uid || body.rfid || body.uid) || ('RFID-' + Date.now().toString().slice(-6));
-    const nis = cleanStr(body.nis) || ('NIS-' + Date.now().toString().slice(-6));
+    const rfid_uid = sanitizeRfid(body.rfid_uid || body.rfid || body.uid);
+    const nis = cleanStr(body.nis);
 
     if (!nama || !kelas) {
       return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi!" });
     }
 
+    // 1. Cek apakah data sudah ada berdasarkan ID, NIS, atau RFID
+    let existing = null;
     if (targetId) {
+      const checkId = await db.execute({
+        sql: "SELECT * FROM siswa WHERE id = ? OR nis = ?",
+        args: [targetId, targetId]
+      });
+      if (checkId.rows.length > 0) existing = checkId.rows[0];
+    }
+
+    if (!existing && rfid_uid) {
+      const checkRfid = await db.execute({
+        sql: "SELECT * FROM siswa WHERE rfid_uid = ? OR uid = ?",
+        args: [rfid_uid, rfid_uid]
+      });
+      if (checkRfid.rows.length > 0) existing = checkRfid.rows[0];
+    }
+
+    if (!existing && nis) {
+      const checkNis = await db.execute({
+        sql: "SELECT * FROM siswa WHERE nis = ?",
+        args: [nis]
+      });
+      if (checkNis.rows.length > 0) existing = checkNis.rows[0];
+    }
+
+    if (existing) {
+      // UPDATE DATA YANG SUDAH ADA
+      const finalId = existing.id;
+      const finalNis = nis || existing.nis || ('NIS-' + Date.now().toString().slice(-6));
+      const finalRfid = rfid_uid || existing.rfid_uid || existing.uid || finalNis;
+
       await db.execute({
-        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ? OR nis = ?",
-        args: [nama, kelas, rfid_uid, rfid_uid, nis, targetId, targetId]
+        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ?",
+        args: [nama, kelas, finalRfid, finalRfid, finalNis, finalId]
       });
       return res.json({ success: true, message: `Data '${nama}' berhasil diperbarui!` });
     } else {
+      // INSERT ATAU REPLACE DENGAN AMAN
+      const finalNis = nis || ('NIS-' + Date.now().toString().slice(-6));
+      const finalRfid = rfid_uid || finalNis;
+
       await db.execute({
-        sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
-        args: [nis, nama, kelas, rfid_uid, rfid_uid]
+        sql: "INSERT OR REPLACE INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
+        args: [finalNis, nama, kelas, finalRfid, finalRfid]
       });
       return res.json({ success: true, message: `Siswa '${nama}' berhasil ditambahkan!` });
     }
@@ -300,8 +335,8 @@ app.delete('/api/siswa/:id', async (req, res) => {
     const { id } = req.params;
 
     await db.execute({
-      sql: "DELETE FROM siswa WHERE id = ? OR nis = ?",
-      args: [id, id]
+      sql: "DELETE FROM siswa WHERE id = ? OR nis = ? OR rfid_uid = ? OR uid = ?",
+      args: [id, id, id, id]
     });
 
     return res.json({ success: true, message: "Siswa berhasil dihapus!" });
@@ -365,7 +400,7 @@ app.post('/api/tap', async (req, res) => {
   }
 });
 
-// STATIC SERVING & CATCH-ALL
+// STATIC SERVING
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('*', (req, res) => {
