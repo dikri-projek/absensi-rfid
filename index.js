@@ -18,7 +18,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 3. Native Turso HTTP Driver (Bypass @libsql/client SDK untuk menghindari error migration)
+// 3. Native Turso HTTP Driver (Bypass SDK untuk mencegah error migration/WebSocket)
 async function tursoQuery(stmt) {
   let sql = "";
   let args = [];
@@ -44,7 +44,6 @@ async function tursoQuery(stmt) {
     url = url.slice(0, -1);
   }
 
-  // Format argumen ke Hrana API format
   const formattedArgs = args.map(arg => {
     if (arg === null || arg === undefined) return { type: "null" };
     if (typeof arg === "number") {
@@ -98,12 +97,10 @@ async function tursoQuery(stmt) {
 }
 
 function getDb() {
-  return {
-    execute: tursoQuery
-  };
+  return { execute: tursoQuery };
 }
 
-// 4. Inisialisasi Tabel & User Admin
+// 4. Inisialisasi Database
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
@@ -155,14 +152,12 @@ function sanitizeRfid(val) {
   return str === '' ? null : str;
 }
 
-// ---------------- API ENDPOINTS ----------------
+// 5. API ENDPOINTS
 
-// 1. API PING STATUS
 app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
 });
 
-// 2. API LOGIN
 app.post('/api/login', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -190,7 +185,6 @@ app.post('/api/login', async (req, res, next) => {
   }
 });
 
-// 3. SISWA (GET ALL)
 app.get('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -202,15 +196,20 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 4. SISWA (TAMBAH / UPDATE)
+// TAMBAH / UPDATE SISWA (DILENGKAPI AUTO-GENERATE NIS JIKA KOSONG)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const { nis, nama, kelas, rfid_uid } = req.body || {};
+    let { nis, nama, kelas, rfid_uid } = req.body || {};
 
-    if (!nis || !nama || !kelas) {
-      return res.status(400).json({ success: false, message: "NIS, Nama, dan Kelas wajib diisi!" });
+    if (!nama || !kelas) {
+      return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi!" });
+    }
+
+    // Jika NIS tidak dikirim dari frontend, buat NIS otomatis
+    if (!nis || String(nis).trim() === '') {
+      nis = 'NIS-' + Date.now().toString().slice(-6);
     }
 
     await db.execute({
@@ -223,7 +222,7 @@ app.post('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 5. IMPORT SISWA SEKALIGUS
+// IMPORT EXCEL / BULK SISWA
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
@@ -246,21 +245,25 @@ async function handleBulkImport(req, res, next) {
     for (const s of list) {
       if (!s || typeof s !== 'object') continue;
 
-      const nis = s.nis || s.NIS;
-      const nama = s.nama || s.Nama || s.NAMA;
-      const kelas = s.kelas || s.Kelas || s.KELAS;
-      const rfid_uid = s.rfid_uid || s.rfid || s.RFID || null;
+      let nis = s.nis || s.NIS || s.Nis || '';
+      const nama = s.nama || s.Nama || s.NAMA || '';
+      const kelas = s.kelas || s.Kelas || s.KELAS || '';
+      const rfid_uid = s.rfid_uid || s.rfid || s.RFID || s.Rfid || null;
 
-      if (nis && nama) {
+      if (nama) {
+        if (!nis || String(nis).trim() === '') {
+          nis = 'NIS-' + Math.floor(100000 + Math.random() * 900000);
+        }
+
         await db.execute({
           sql: "INSERT OR REPLACE INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
-          args: [String(nis), String(nama), String(kelas || ''), sanitizeRfid(rfid_uid)]
+          args: [String(nis), String(nama), String(kelas), sanitizeRfid(rfid_uid)]
         });
         insertedCount++;
       }
     }
 
-    return res.json({ success: true, message: `${insertedCount} data siswa berhasil disimpan!` });
+    return res.json({ success: true, message: `${insertedCount} data siswa berhasil diimpor!` });
   } catch (error) {
     next(error);
   }
@@ -268,7 +271,6 @@ async function handleBulkImport(req, res, next) {
 app.post('/api/siswa/import', handleBulkImport);
 app.post('/api/siswa/bulk', handleBulkImport);
 
-// 6. DAFTAR KELAS
 app.get('/api/daftar-kelas', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -281,7 +283,6 @@ app.get('/api/daftar-kelas', async (req, res, next) => {
   }
 });
 
-// 7. DAFTAR SISWA PER KELAS
 app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -304,7 +305,6 @@ app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   }
 });
 
-// 8. USERS (GET ALL & POST TAMBAH)
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -336,7 +336,6 @@ app.post('/api/users', async (req, res, next) => {
   }
 });
 
-// 9. TAP RFID
 app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -369,7 +368,6 @@ app.post('/api/tap', async (req, res, next) => {
   }
 });
 
-// 10. REKAP & LOG ABSENSI
 async function handleGetAbsensi(req, res, next) {
   try {
     await ensureTablesExist();
@@ -383,15 +381,13 @@ async function handleGetAbsensi(req, res, next) {
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 
-// Serve Static Frontend Files
+// Static Routing Frontend & SPA Fallback
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Catch-All Endpoint API 404
 app.all('/api/*', (req, res) => {
   res.status(404).json({ success: false, message: `Endpoint API ${req.originalUrl} tidak ditemukan.` });
 });
 
-// Fallback untuk SPA Frontend
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
