@@ -27,7 +27,6 @@
       background-color: #ffffff;
     }
 
-    /* PENEGASAN WARNA HITAM PEKAT PADA TABEL & FORM */
     .table-custom, 
     .table-custom th, 
     .table-custom td, 
@@ -35,7 +34,8 @@
     table th, 
     table td,
     .modal-body,
-    .modal-body label {
+    .modal-body label,
+    select.form-select option {
       color: #000000 !important;
       vertical-align: middle;
     }
@@ -56,18 +56,10 @@
     }
 
     input.form-control, 
-    select.form-select, 
-    textarea.form-control {
+    select.form-select {
       color: #000000 !important;
       background-color: #ffffff !important;
       border: 1px solid #ced4da;
-    }
-
-    input.form-control:focus, 
-    select.form-select:focus {
-      color: #000000 !important;
-      border-color: #0d6efd;
-      box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
     }
 
     .badge-rfid {
@@ -93,14 +85,22 @@
   <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
     <div class="container">
       <a class="navbar-brand" href="#"><i class="fa-solid fa-id-card me-2"></i>PRESENSI RFID SISWA</a>
-      <button class="btn btn-outline-light btn-sm" onclick="loadSemuaData()">
-        <i class="fa-solid fa-rotate me-1"></i> Refresh Data
-      </button>
+      <div class="d-flex gap-2">
+        <button class="btn btn-warning btn-sm fw-bold" onclick="reparasiDatabase()">
+          <i class="fa-solid fa-screwdriver-wrench me-1"></i> Reset / Perbaiki Tabel
+        </button>
+        <button class="btn btn-outline-light btn-sm" onclick="loadSemuaData()">
+          <i class="fa-solid fa-rotate me-1"></i> Refresh
+        </button>
+      </div>
     </div>
   </nav>
 
   <div class="container my-4">
     
+    <!-- ALERT ERROR NOTIFIKASI -->
+    <div id="errorNoticeBox" class="d-none"></div>
+
     <!-- DASHBOARD STATS -->
     <div class="row g-3 mb-4">
       <div class="col-md-6">
@@ -129,11 +129,16 @@
       <!-- TABEL DATA SISWA -->
       <div class="col-lg-8">
         <div class="card p-3">
-          <div class="d-flex justify-content-between align-items-center mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
             <h5 class="fw-bold m-0 text-dark"><i class="fa-solid fa-user-graduate me-2 text-primary"></i>Data Siswa</h5>
-            <button class="btn btn-primary btn-sm" onclick="bukaModalTambah()">
-              <i class="fa-solid fa-plus me-1"></i> Tambah Siswa
-            </button>
+            <div class="d-flex gap-2">
+              <select id="filterKelasSelect" class="form-select form-select-sm" style="width: 140px;" onchange="renderTabelSiswa()">
+                <option value="">Semua Kelas</option>
+              </select>
+              <button class="btn btn-primary btn-sm fw-bold" onclick="bukaModalTambah()">
+                <i class="fa-solid fa-plus me-1"></i> Tambah Siswa
+              </button>
+            </div>
           </div>
 
           <div class="table-responsive">
@@ -145,7 +150,7 @@
                   <th>Nama Siswa</th>
                   <th>Kelas</th>
                   <th>UID RFID</th>
-                  <th class="text-center" style="width: 120px;">Aksi</th>
+                  <th class="text-center" style="width: 110px;">Aksi</th>
                 </tr>
               </thead>
               <tbody id="tabelSiswaBody">
@@ -165,7 +170,7 @@
           <form id="formTapRfid" onsubmit="prosesTapRfid(event)">
             <div class="mb-3">
               <label class="form-label text-dark fw-semibold">Scan / Masukkan UID RFID</label>
-              <input type="text" id="tapRfidInput" class="form-control form-control-lg text-center fw-bold" placeholder="Contoh: 12345678" required autocomplete="off">
+              <input type="text" id="tapRfidInput" class="form-control form-control-lg text-center fw-bold" placeholder="Contoh: RFID1001" required autocomplete="off">
             </div>
             <button type="submit" class="btn btn-success w-100 py-2 fw-bold">
               <i class="fa-solid fa-hand-pointer me-1"></i> TAP KARTU PRESENSI
@@ -221,19 +226,23 @@
               <input type="text" id="siswaNama" class="form-control" placeholder="Ahmad Rizky" required>
             </div>
 
+            <!-- MENU PILIHAN KELAS (DROPDOWN) -->
             <div class="mb-3">
-              <label class="form-label fw-bold">Kelas</label>
-              <input type="text" id="siswaKelas" class="form-control" placeholder="X IPA 1" required>
+              <label class="form-label fw-bold">Pilihan Kelas</label>
+              <select id="siswaKelasSelect" class="form-select" onchange="toggleCustomKelasInput(this.value)" required>
+                <option value="">-- Pilih Kelas --</option>
+              </select>
+              <input type="text" id="siswaKelasCustom" class="form-control mt-2 d-none" placeholder="Masukkan Nama Kelas Lainnya...">
             </div>
 
             <div class="mb-3">
               <label class="form-label fw-bold">UID RFID Kartu</label>
-              <input type="text" id="siswaRfid" class="form-control" placeholder="12345678" required>
+              <input type="text" id="siswaRfid" class="form-control" placeholder="RFID1001" required>
             </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-            <button type="submit" class="btn btn-primary fw-bold"><i class="fa-solid fa-save me-1"></i> Simpan Data</button>
+            <button type="submit" class="btn btn-primary fw-bold" id="btnSimpan"><i class="fa-solid fa-save me-1"></i> Simpan Data</button>
           </div>
         </form>
       </div>
@@ -245,6 +254,8 @@
 
   <script>
     let modalInstance = null;
+    let cacheSiswaList = [];
+    let cacheKelasList = [];
 
     document.addEventListener("DOMContentLoaded", () => {
       modalInstance = new bootstrap.Modal(document.getElementById('siswaModal'));
@@ -252,55 +263,160 @@
     });
 
     async function loadSemuaData() {
-      await Promise.all([loadSiswa(), loadAbsensi()]);
+      await Promise.all([loadDaftarKelas(), loadSiswa(), loadAbsensi()]);
     }
 
-    // FETCH & TAMPILKAN SISWA
+    // REPARASI DATABASE SECARA BERSIH
+    async function reparasiDatabase() {
+      if (!confirm("Tindakan ini akan me-reset dan merapikan tabel siswa agar bisa digunakan normal. Lanjutkan?")) return;
+
+      try {
+        const res = await fetch('/api/repair-db', { method: 'POST' });
+        const json = await res.json();
+        alert(json.message);
+        loadSemuaData();
+      } catch (err) {
+        alert("Gagal reparasi: " + err.message);
+      }
+    }
+
+    // FETCH PILIHAN KELAS
+    async function loadDaftarKelas() {
+      try {
+        const res = await fetch('/api/kelas');
+        const json = await res.json();
+        cacheKelasList = json.kelas || [
+          "10 IPA 1", "10 IPA 2", "10 IPS 1", "10 IPS 2",
+          "11 IPA 1", "11 IPA 2", "11 IPS 1", "11 IPS 2",
+          "12 IPA 1", "12 IPA 2", "12 IPS 1", "12 IPS 2"
+        ];
+        populateKelasDropdowns();
+      } catch (err) {
+        console.error("Gagal load kelas:", err);
+      }
+    }
+
+    function populateKelasDropdowns() {
+      const modalSelect = document.getElementById('siswaKelasSelect');
+      const filterSelect = document.getElementById('filterKelasSelect');
+
+      let modalOptions = `<option value="">-- Pilih Kelas --</option>`;
+      cacheKelasList.forEach(k => {
+        modalOptions += `<option value="${k}">${k}</option>`;
+      });
+      modalOptions += `<option value="__CUSTOM__">+ Tambah Kelas Lain...</option>`;
+      modalSelect.innerHTML = modalOptions;
+
+      let filterOptions = `<option value="">Semua Kelas</option>`;
+      cacheKelasList.forEach(k => {
+        filterOptions += `<option value="${k}">${k}</option>`;
+      });
+      filterSelect.innerHTML = filterOptions;
+    }
+
+    function toggleCustomKelasInput(val) {
+      const customInput = document.getElementById('siswaKelasCustom');
+      if (val === '__CUSTOM__') {
+        customInput.classList.remove('d-none');
+        customInput.required = true;
+      } else {
+        customInput.classList.add('d-none');
+        customInput.required = false;
+      }
+    }
+
+    // FETCH & RENDER TABEL SISWA
     async function loadSiswa() {
       const tbody = document.getElementById('tabelSiswaBody');
+      const errBox = document.getElementById('errorNoticeBox');
+
       try {
         const res = await fetch('/api/siswa');
         const json = await res.json();
 
         if (!res.ok || json.success === false) {
-          tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">Gagal memuat data dari database: ${json.message || 'Error Server'}</td></tr>`;
+          errBox.className = "alert alert-danger fw-bold mb-4";
+          errBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation me-2"></i><strong>Gagal Load Database:</strong> ${json.message || 'Koneksi Turso bermasalah'}`;
+          tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">Gagal memuat data dari database. Silakan tekan tombol "Reset / Perbaiki Tabel" di kanan atas.</td></tr>`;
           return;
         }
 
-        let list = json.data || json.siswa || [];
+        errBox.className = "d-none";
+        cacheSiswaList = json.data || json.siswa || [];
+        document.getElementById('totalSiswaCount').innerText = cacheSiswaList.length;
 
-        document.getElementById('totalSiswaCount').innerText = list.length;
-
-        if (list.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="6" class="text-center text-dark py-4">Data siswa di database masih kosong.<br><button class="btn btn-sm btn-primary mt-2" onclick="bukaModalTambah()"><i class="fa-solid fa-plus me-1"></i> Tambah Siswa Manual</button></td></tr>`;
-          return;
-        }
-
-        tbody.innerHTML = list.map((s, idx) => `
-          <tr>
-            <td class="text-center fw-bold">${idx + 1}</td>
-            <td class="fw-bold">${s.nis || '-'}</td>
-            <td class="fw-bold">${s.nama || '-'}</td>
-            <td><span class="badge bg-secondary">${s.kelas || '-'}</span></td>
-            <td><span class="badge-rfid">${s.rfid_uid || '-'}</span></td>
-            <td class="text-center">
-              <button class="btn btn-warning btn-sm me-1" onclick='editSiswa(${JSON.stringify(s)})' title="Edit">
-                <i class="fa-solid fa-pen-to-square"></i>
-              </button>
-              <button class="btn btn-danger btn-sm" onclick="hapusSiswa('${s.id || s.nis}')" title="Hapus">
-                <i class="fa-solid fa-trash"></i>
-              </button>
-            </td>
-          </tr>
-        `).join('');
-
+        renderTabelSiswa();
       } catch (err) {
-        console.error("Gagal load siswa:", err);
+        errBox.className = "alert alert-danger fw-bold mb-4";
+        errBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation me-2"></i><strong>Gagal Koneksi:</strong> ${err.message}`;
         tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">Gagal terhubung ke API: ${err.message}</td></tr>`;
       }
     }
 
-    // FETCH & TAMPILKAN REKAP PRESENSI
+    function renderTabelSiswa() {
+      const tbody = document.getElementById('tabelSiswaBody');
+      const filterKelas = document.getElementById('filterKelasSelect').value;
+
+      let list = cacheSiswaList;
+      if (filterKelas) {
+        list = list.filter(s => String(s.kelas).trim() === filterKelas);
+      }
+
+      if (cacheSiswaList.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="text-center text-dark py-4">
+              Data siswa di database masih kosong.<br>
+              <div class="mt-2 d-flex justify-content-center gap-2">
+                <button class="btn btn-sm btn-primary fw-bold" onclick="bukaModalTambah()"><i class="fa-solid fa-plus me-1"></i> Tambah Manual</button>
+                <button class="btn btn-sm btn-success fw-bold" onclick="isiDataSample()"><i class="fa-solid fa-bolt me-1"></i> Isi 4 Data Contoh</button>
+              </div>
+            </td>
+          </tr>`;
+        return;
+      }
+
+      if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">Tidak ada siswa di kelas '${filterKelas}'</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = list.map((s, idx) => `
+        <tr>
+          <td class="text-center fw-bold">${idx + 1}</td>
+          <td class="fw-bold">${s.nis || '-'}</td>
+          <td class="fw-bold">${s.nama || '-'}</td>
+          <td><span class="badge bg-secondary">${s.kelas || '-'}</span></td>
+          <td><span class="badge-rfid">${s.rfid_uid || '-'}</span></td>
+          <td class="text-center">
+            <button class="btn btn-warning btn-sm me-1" onclick='editSiswa(${JSON.stringify(s)})' title="Edit">
+              <i class="fa-solid fa-pen-to-square"></i>
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="hapusSiswa('${s.id || s.nis}')" title="Hapus">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // ISI DATA CONTOH
+    async function isiDataSample() {
+      try {
+        const res = await fetch('/api/siswa/seed', { method: 'POST' });
+        const json = await res.json();
+        if (json.success) {
+          alert("4 Data siswa contoh berhasil ditambahkan!");
+          loadSemuaData();
+        } else {
+          alert("Gagal: " + json.message);
+        }
+      } catch (err) {
+        alert("Error: " + err.message);
+      }
+    }
+
+    // FETCH REKAP PRESENSI
     async function loadAbsensi() {
       const tbody = document.getElementById('tabelAbsensiBody');
       try {
@@ -308,7 +424,6 @@
         const json = await res.json();
 
         let list = json.data || json.absensi || [];
-
         document.getElementById('totalAbsenCount').innerText = list.length;
 
         if (list.length === 0) {
@@ -329,11 +444,13 @@
       }
     }
 
-    // FORM MODAL TAMBAH & EDIT
+    // MODAL TAMBAH & EDIT SISWA
     function bukaModalTambah() {
       document.getElementById('modalTitle').innerText = "Tambah Siswa Baru";
       document.getElementById('formSiswa').reset();
       document.getElementById('siswaId').value = "";
+      document.getElementById('siswaKelasSelect').value = "";
+      toggleCustomKelasInput("");
       modalInstance.show();
     }
 
@@ -342,24 +459,53 @@
       document.getElementById('siswaId').value = s.id || s.nis || "";
       document.getElementById('siswaNis').value = s.nis || "";
       document.getElementById('siswaNama').value = s.nama || "";
-      document.getElementById('siswaKelas').value = s.kelas || "";
       document.getElementById('siswaRfid').value = s.rfid_uid || "";
+
+      const select = document.getElementById('siswaKelasSelect');
+      const kelasVal = s.kelas || "";
+
+      if (cacheKelasList.includes(kelasVal)) {
+        select.value = kelasVal;
+        toggleCustomKelasInput(kelasVal);
+      } else if (kelasVal) {
+        select.value = "__CUSTOM__";
+        toggleCustomKelasInput("__CUSTOM__");
+        document.getElementById('siswaKelasCustom').value = kelasVal;
+      } else {
+        select.value = "";
+        toggleCustomKelasInput("");
+      }
+
       modalInstance.show();
     }
 
-    // SIMPAN/UPDATE DATA SISWA
+    // SIMPAN/UPDATE SISWA
     async function simpanSiswa(e) {
       e.preventDefault();
       const id = document.getElementById('siswaId').value;
+      const btn = document.getElementById('btnSimpan');
+      
+      const selectVal = document.getElementById('siswaKelasSelect').value;
+      const customVal = document.getElementById('siswaKelasCustom').value.trim();
+      const finalKelas = (selectVal === '__CUSTOM__') ? customVal : selectVal;
+
+      if (!finalKelas) {
+        alert("Silakan pilih atau isi Kelas terlebih dahulu!");
+        return;
+      }
+
       const payload = {
         id: id,
         nis: document.getElementById('siswaNis').value.trim(),
         nama: document.getElementById('siswaNama').value.trim(),
-        kelas: document.getElementById('siswaKelas').value.trim(),
+        kelas: finalKelas,
         rfid_uid: document.getElementById('siswaRfid').value.trim()
       };
 
       try {
+        btn.disabled = true;
+        btn.innerText = "Saving...";
+
         const url = id ? `/api/siswa/${id}` : '/api/siswa';
         const method = id ? 'PUT' : 'POST';
 
@@ -370,15 +516,19 @@
         });
 
         const json = await res.json();
-        if (json.success) {
+        
+        if (res.ok && json.success) {
           alert(json.message || "Data siswa berhasil disimpan!");
           modalInstance.hide();
           loadSemuaData();
         } else {
-          alert("Gagal: " + (json.message || "Terjadi kesalahan"));
+          alert("Gagal menyimpan data: " + (json.message || "Terjadi kesalahan server"));
         }
       } catch (err) {
-        alert("Error: " + err.message);
+        alert("Error Koneksi: " + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-save me-1"></i> Simpan Data`;
       }
     }
 
@@ -401,7 +551,7 @@
       }
     }
 
-    // SIMULATOR TAP RFID
+    // TAP RFID SIMULATOR
     async function prosesTapRfid(e) {
       e.preventDefault();
       const input = document.getElementById('tapRfidInput');

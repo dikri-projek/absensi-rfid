@@ -63,7 +63,7 @@ async function tursoQuery(stmt) {
   let token = (process.env.TURSO_AUTH_TOKEN || '').trim().replace(/^["']|["']$/g, '');
 
   if (!url || !token) {
-    throw new Error("TURSO_DATABASE_URL atau TURSO_AUTH_TOKEN belum diatur pada Vercel Settings.");
+    throw new Error("TURSO_DATABASE_URL atau TURSO_AUTH_TOKEN belum diatur pada Environment Variables Vercel.");
   }
 
   if (url.startsWith('libsql://')) {
@@ -191,32 +191,54 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
 });
 
-// LOGIN
-app.post('/api/login', async (req, res) => {
+// REPAIR DATABASE (DROPS & RECREATES TABEL SISWA SECARA BERSIH)
+app.post('/api/repair-db', async (req, res) => {
+  try {
+    const db = getDb();
+    await db.execute("DROP TABLE IF EXISTS siswa");
+    await db.execute(`
+      CREATE TABLE siswa (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nis TEXT,
+        nama TEXT,
+        kelas TEXT,
+        rfid_uid TEXT,
+        uid TEXT
+      );
+    `);
+    isInitialized = true;
+    return res.json({ success: true, message: "Tabel siswa berhasil direparasi & di-reset bersih!" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Gagal reparasi: " + error.message });
+  }
+});
+
+// GET DAFTAR PILIHAN KELAS
+app.get('/api/kelas', async (req, res) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const body = parseRequestBody(req);
+    
+    const result = await db.execute("SELECT DISTINCT kelas FROM siswa WHERE kelas IS NOT NULL AND TRIM(kelas) != ''");
+    const dbKelas = (result.rows || []).map(r => cleanStr(r.kelas)).filter(Boolean);
 
-    const username = cleanStr(body.username);
-    const password = cleanStr(body.password);
+    const defaultKelas = [
+      "10 IPA 1", "10 IPA 2", "10 IPS 1", "10 IPS 2",
+      "11 IPA 1", "11 IPA 2", "11 IPS 1", "11 IPS 2",
+      "12 IPA 1", "12 IPA 2", "12 IPS 1", "12 IPS 2"
+    ];
 
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: "Username dan password wajib diisi." });
-    }
-
-    const result = await db.execute({
-      sql: "SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(?) AND TRIM(password) = ?",
-      args: [username, password]
-    });
-
-    if (result.rows.length > 0) {
-      return res.json({ success: true, message: "Login berhasil!", user: result.rows[0] });
-    }
-
-    return res.status(401).json({ success: false, message: "Username atau password salah." });
+    const allKelas = Array.from(new Set([...defaultKelas, ...dbKelas]));
+    return res.json({ success: true, kelas: allKelas });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.json({
+      success: true,
+      kelas: [
+        "10 IPA 1", "10 IPA 2", "10 IPS 1", "10 IPS 2",
+        "11 IPA 1", "11 IPA 2", "11 IPS 1", "11 IPS 2",
+        "12 IPA 1", "12 IPA 2", "12 IPS 1", "12 IPS 2"
+      ]
+    });
   }
 });
 
@@ -248,7 +270,7 @@ app.get('/api/siswa', async (req, res) => {
   }
 });
 
-// SIMPAN & EDIT SISWA (MENGGUNAKAN INSERT OR REPLACE AGAR TIDAK MENTOK UNIQUE CONSTRAINT)
+// SIMPAN & EDIT SISWA
 async function handleSaveOrUpdateSiswa(req, res) {
   try {
     await ensureTablesExist();
@@ -268,57 +290,36 @@ async function handleSaveOrUpdateSiswa(req, res) {
       return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi!" });
     }
 
-    // 1. Cek apakah data sudah ada berdasarkan ID, NIS, atau RFID
-    let existing = null;
+    const finalNis = nis || ('NIS-' + Date.now().toString().slice(-6));
+    const finalRfid = rfid_uid || finalNis;
+
+    // 1. Cek apakah mode Edit (ada targetId)
     if (targetId) {
-      const checkId = await db.execute({
-        sql: "SELECT * FROM siswa WHERE id = ? OR nis = ?",
-        args: [targetId, targetId]
-      });
-      if (checkId.rows.length > 0) existing = checkId.rows[0];
-    }
-
-    if (!existing && rfid_uid) {
-      const checkRfid = await db.execute({
-        sql: "SELECT * FROM siswa WHERE rfid_uid = ? OR uid = ?",
-        args: [rfid_uid, rfid_uid]
-      });
-      if (checkRfid.rows.length > 0) existing = checkRfid.rows[0];
-    }
-
-    if (!existing && nis) {
-      const checkNis = await db.execute({
-        sql: "SELECT * FROM siswa WHERE nis = ?",
-        args: [nis]
-      });
-      if (checkNis.rows.length > 0) existing = checkNis.rows[0];
-    }
-
-    if (existing) {
-      // UPDATE DATA YANG SUDAH ADA
-      const finalId = existing.id;
-      const finalNis = nis || existing.nis || ('NIS-' + Date.now().toString().slice(-6));
-      const finalRfid = rfid_uid || existing.rfid_uid || existing.uid || finalNis;
-
       await db.execute({
-        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ?",
-        args: [nama, kelas, finalRfid, finalRfid, finalNis, finalId]
+        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ? OR nis = ?",
+        args: [nama, kelas, finalRfid, finalRfid, finalNis, targetId, targetId]
       });
       return res.json({ success: true, message: `Data '${nama}' berhasil diperbarui!` });
-    } else {
-      // INSERT ATAU REPLACE DENGAN AMAN
-      const finalNis = nis || ('NIS-' + Date.now().toString().slice(-6));
-      const finalRfid = rfid_uid || finalNis;
+    }
 
+    // 2. Mode Tambah Baru
+    try {
       await db.execute({
-        sql: "INSERT OR REPLACE INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
+        sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
         args: [finalNis, nama, kelas, finalRfid, finalRfid]
       });
-      return res.json({ success: true, message: `Siswa '${nama}' berhasil ditambahkan!` });
+    } catch (insertErr) {
+      // Fallback jika terjadi kendala bentrok data
+      await db.execute({
+        sql: "UPDATE siswa SET nama = ?, kelas = ? WHERE rfid_uid = ? OR uid = ? OR nis = ?",
+        args: [nama, kelas, finalRfid, finalRfid, finalNis]
+      });
     }
+
+    return res.json({ success: true, message: `Siswa '${nama}' berhasil disimpan!` });
   } catch (error) {
     console.error("Save Siswa Error:", error.message);
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: "Gagal menyimpan ke database: " + error.message });
   }
 }
 
@@ -326,6 +327,32 @@ app.post('/api/siswa', handleSaveOrUpdateSiswa);
 app.put('/api/siswa', handleSaveOrUpdateSiswa);
 app.post('/api/siswa/:id', handleSaveOrUpdateSiswa);
 app.put('/api/siswa/:id', handleSaveOrUpdateSiswa);
+
+// SEED SAMPLE SISWA (ISI 4 CONTOH DATA)
+app.post('/api/siswa/seed', async (req, res) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+
+    const sampleStudents = [
+      { nis: '1001', nama: 'Ahmad Rizky', kelas: '10 IPA 1', rfid: 'RFID1001' },
+      { nis: '1002', nama: 'Siti Rahma', kelas: '10 IPA 1', rfid: 'RFID1002' },
+      { nis: '1003', nama: 'Budi Santoso', kelas: '10 IPA 2', rfid: 'RFID1003' },
+      { nis: '1004', nama: 'Dewi Lestari', kelas: '11 IPA 1', rfid: 'RFID1004' }
+    ];
+
+    for (const s of sampleStudents) {
+      await db.execute({
+        sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
+        args: [s.nis, s.nama, s.kelas, s.rfid, s.rfid]
+      });
+    }
+
+    return res.json({ success: true, message: "Berhasil mengisi 4 data siswa contoh!" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 // HAPUS SISWA
 app.delete('/api/siswa/:id', async (req, res) => {
