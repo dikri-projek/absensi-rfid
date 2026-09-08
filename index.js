@@ -18,7 +18,6 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Helper Parsing Body Teraman
 function parseRequestBody(req) {
   let body = req.body;
   if (!body) return {};
@@ -39,7 +38,6 @@ function parseRequestBody(req) {
   return body || {};
 }
 
-// Helper Ekstraksi Nilai Kolom Turso
 function extractCellValue(cell) {
   if (cell === null || cell === undefined) return null;
   if (typeof cell === 'object') {
@@ -131,7 +129,6 @@ function getDb() {
   return { execute: tursoQuery };
 }
 
-// 4. Helper Pembersih String & RFID
 function sanitizeRfid(val) {
   if (val === null || val === undefined) return null;
   const str = String(val).trim();
@@ -146,7 +143,7 @@ function cleanStr(val) {
   return str;
 }
 
-// 5. Inisialisasi Database & Migrasi Tabel
+// 4. Inisialisasi Database, Tabel & Seed Data Awal
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
@@ -192,15 +189,34 @@ async function ensureTablesExist() {
 
   try { await db.execute("ALTER TABLE absensi ADD COLUMN keterangan TEXT DEFAULT 'Hadir';"); } catch(e) {}
 
+  // User Default Admin
   await db.execute({
     sql: "INSERT OR IGNORE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
     args: ['admin', 'admin', 'Administrator', 'admin']
   });
 
+  // Otomatis Isikan Data Siswa Awal Jika Tabel Masih Kosong
+  try {
+    const checkSiswa = await db.execute("SELECT COUNT(*) as total FROM siswa");
+    const totalSiswa = checkSiswa.rows?.[0]?.total || checkSiswa.rows?.[0]?.['COUNT(*)'] || 0;
+    
+    if (Number(totalSiswa) === 0) {
+      await db.execute({
+        sql: `INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES 
+              ('1001', 'Ahmad Rizky', 'X IPA 1', '12345678', '12345678'),
+              ('1002', 'Siti Aminah', 'XI IPA 2', '87654321', '87654321'),
+              ('1003', 'Budi Santoso', 'XII IPS 1', '11223344', '11223344')`,
+        args: []
+      });
+    }
+  } catch (e) {
+    console.error("Gagal melakukan auto-seed siswa:", e.message);
+  }
+
   isInitialized = true;
 }
 
-// 6. API ENDPOINTS
+// 5. API ENDPOINTS
 
 app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
@@ -241,7 +257,12 @@ app.get('/api/users', async (req, res, next) => {
     await ensureTablesExist();
     const db = getDb();
     const result = await db.execute("SELECT id, username, nama, role FROM users ORDER BY id DESC");
-    return res.json(result.rows);
+    const rows = result.rows || [];
+    
+    if (req.query.raw === 'true' || req.query.format === 'array') {
+      return res.json(rows);
+    }
+    return res.json({ success: true, data: rows, users: rows });
   } catch (error) {
     next(error);
   }
@@ -289,7 +310,7 @@ app.delete('/api/users/:id', async (req, res, next) => {
   }
 });
 
-// GET DAFTAR KELAS (UNTUK DROPDOWN & PRINTOUT REKAP)
+// GET DAFTAR KELAS (DROPDOWN & PRINTOUT)
 async function handleGetKelas(req, res, next) {
   try {
     await ensureTablesExist();
@@ -315,11 +336,6 @@ async function handleGetKelas(req, res, next) {
 
     const uniqueKelas = Array.from(new Set([...dbKelas, ...defaultKelas])).sort();
 
-    // Format Opsi Kelas (Support Format Object dan Array String)
-    if (req.query.format === 'string' || req.query.raw === 'true') {
-      return res.json(uniqueKelas);
-    }
-
     const formattedObjects = uniqueKelas.map((k, index) => ({
       id: index + 1,
       id_kelas: index + 1,
@@ -330,7 +346,17 @@ async function handleGetKelas(req, res, next) {
       label: k
     }));
 
-    return res.json(formattedObjects);
+    if (req.query.raw === 'true' || req.query.format === 'string') {
+      return res.json(uniqueKelas);
+    }
+
+    return res.json({
+      success: true,
+      data: formattedObjects,
+      kelas: formattedObjects,
+      list: uniqueKelas,
+      options: formattedObjects
+    });
   } catch (error) {
     next(error);
   }
@@ -341,7 +367,7 @@ app.get('/api/kelas-list', handleGetKelas);
 app.get('/api/siswa/kelas', handleGetKelas);
 app.get('/api/absensi/kelas', handleGetKelas);
 
-// GET SEMUA SISWA
+// GET DATA SISWA (FORMAT UNIVERSAL SUPAYA TABEL TAMPIL KONSISTEN)
 app.get('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -349,7 +375,7 @@ app.get('/api/siswa', async (req, res, next) => {
     
     let result;
     try {
-      result = await db.execute("SELECT *, rowid FROM siswa ORDER BY id DESC");
+      result = await db.execute("SELECT * FROM siswa ORDER BY id DESC");
     } catch(e) {
       result = await db.execute("SELECT * FROM siswa");
     }
@@ -359,8 +385,8 @@ app.get('/api/siswa', async (req, res, next) => {
       const nama = s.nama || s.nama_siswa || s.name || 'Tanpa Nama';
       const kelas = s.kelas || s.kelas_siswa || s.rombel || '-';
       const rfid_uid = s.rfid_uid || s.rfid || s.uid || '';
-      const nis = s.nis || s.id || s.rowid || '';
-      const id = s.id || s.rowid || nis;
+      const nis = s.nis || s.id || '';
+      const id = s.id || nis || Math.floor(Math.random() * 10000);
 
       return {
         id,
@@ -377,7 +403,19 @@ app.get('/api/siswa', async (req, res, next) => {
       };
     });
 
-    return res.json(formattedData);
+    if (req.query.raw === 'true' || req.query.format === 'array') {
+      return res.json(formattedData);
+    }
+
+    return res.json({
+      success: true,
+      data: formattedData,
+      siswa: formattedData,
+      list: formattedData,
+      rows: formattedData,
+      items: formattedData,
+      result: formattedData
+    });
   } catch (error) {
     next(error);
   }
@@ -391,8 +429,8 @@ app.get('/api/siswa/:id', async (req, res, next) => {
     const { id } = req.params;
 
     const result = await db.execute({
-      sql: "SELECT *, rowid FROM siswa WHERE id = ? OR nis = ? OR rowid = ? OR rfid_uid = ? OR uid = ?",
-      args: [id, id, id, id, id]
+      sql: "SELECT * FROM siswa WHERE id = ? OR nis = ? OR rfid_uid = ? OR uid = ?",
+      args: [id, id, id, id]
     });
 
     if (result.rows.length === 0) {
@@ -403,10 +441,10 @@ app.get('/api/siswa/:id', async (req, res, next) => {
     const nama = s.nama || s.nama_siswa || s.name || '';
     const kelas = s.kelas || s.kelas_siswa || s.rombel || '';
     const rfid_uid = s.rfid_uid || s.rfid || s.uid || '';
-    const nis = s.nis || s.id || s.rowid || '';
-    const studentId = s.id || s.rowid || nis;
+    const nis = s.nis || s.id || '';
+    const studentId = s.id || nis;
 
-    return res.json({
+    const formattedSiswa = {
       id: studentId,
       nis,
       nama,
@@ -418,13 +456,19 @@ app.get('/api/siswa/:id', async (req, res, next) => {
       rfid_uid,
       rfid: rfid_uid,
       uid: rfid_uid
+    };
+
+    return res.json({
+      success: true,
+      data: formattedSiswa,
+      siswa: formattedSiswa
     });
   } catch (error) {
     next(error);
   }
 });
 
-// SIMPAN & EDIT SISWA (MENDUKUNG POST & PUT)
+// SIMPAN & EDIT SISWA (POST / PUT)
 async function handleSaveOrUpdateSiswa(req, res, next) {
   try {
     await ensureTablesExist();
@@ -448,15 +492,15 @@ async function handleSaveOrUpdateSiswa(req, res, next) {
 
     if (targetId) {
       const checkId = await db.execute({
-        sql: "SELECT *, rowid FROM siswa WHERE id = ? OR nis = ? OR rowid = ?",
-        args: [targetId, targetId, targetId]
+        sql: "SELECT * FROM siswa WHERE id = ? OR nis = ?",
+        args: [targetId, targetId]
       });
       if (checkId.rows.length > 0) existingSiswa = checkId.rows[0];
     }
 
     if (!existingSiswa && rfid_uid) {
       const checkRfid = await db.execute({
-        sql: "SELECT *, rowid FROM siswa WHERE rfid_uid = ? OR uid = ?",
+        sql: "SELECT * FROM siswa WHERE rfid_uid = ? OR uid = ?",
         args: [rfid_uid, rfid_uid]
       });
       if (checkRfid.rows.length > 0) existingSiswa = checkRfid.rows[0];
@@ -464,30 +508,29 @@ async function handleSaveOrUpdateSiswa(req, res, next) {
 
     if (!existingSiswa && nis) {
       const checkNis = await db.execute({
-        sql: "SELECT *, rowid FROM siswa WHERE nis = ? OR id = ?",
+        sql: "SELECT * FROM siswa WHERE nis = ? OR id = ?",
         args: [nis, nis]
       });
       if (checkNis.rows.length > 0) existingSiswa = checkNis.rows[0];
     }
 
     if (existingSiswa) {
-      // UPDATE SISWA
-      const updateId = existingSiswa.id || existingSiswa.rowid || existingSiswa.nis;
+      const updateId = existingSiswa.id || existingSiswa.nis;
       const finalNis = nis || existingSiswa.nis || ('NIS-' + Date.now());
       const finalRfid = rfid_uid || existingSiswa.rfid_uid || existingSiswa.uid || finalNis;
 
       await db.execute({
-        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ? OR rowid = ? OR nis = ?",
-        args: [nama, kelas, finalRfid, finalRfid, finalNis, updateId, updateId, finalNis]
+        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ? OR nis = ?",
+        args: [nama, kelas, finalRfid, finalRfid, finalNis, updateId, finalNis]
       });
 
       return res.json({
         success: true,
         message: `Data siswa '${nama}' berhasil diperbarui!`,
-        siswa: { id: updateId, nis: finalNis, nama, kelas, rfid_uid: finalRfid }
+        siswa: { id: updateId, nis: finalNis, nama, kelas, rfid_uid: finalRfid },
+        data: { id: updateId, nis: finalNis, nama, kelas, rfid_uid: finalRfid }
       });
     } else {
-      // INSERT SISWA BARU
       if (!nis) {
         nis = 'NIS-' + Date.now().toString().slice(-6);
       }
@@ -501,7 +544,8 @@ async function handleSaveOrUpdateSiswa(req, res, next) {
       return res.json({
         success: true,
         message: `Siswa baru '${nama}' berhasil ditambahkan!`,
-        siswa: { nis, nama, kelas, rfid_uid: cleanRfid }
+        siswa: { nis, nama, kelas, rfid_uid: cleanRfid },
+        data: { nis, nama, kelas, rfid_uid: cleanRfid }
       });
     }
   } catch (error) {
@@ -525,8 +569,8 @@ app.delete('/api/siswa/:id', async (req, res, next) => {
     const { id } = req.params;
 
     await db.execute({
-      sql: "DELETE FROM siswa WHERE id = ? OR nis = ? OR rowid = ?",
-      args: [id, id, id]
+      sql: "DELETE FROM siswa WHERE id = ? OR nis = ?",
+      args: [id, id]
     });
 
     return res.json({ success: true, message: "Siswa berhasil dihapus!" });
@@ -595,8 +639,8 @@ async function handleAbsensiManual(req, res, next) {
     const targetIdentifier = body.siswa_id || body.id || body.nis || rfid_uid;
     if ((!nama || !kelas) && targetIdentifier) {
       const checkSiswa = await db.execute({
-        sql: "SELECT *, rowid FROM siswa WHERE id = ? OR nis = ? OR rfid_uid = ? OR uid = ? OR rowid = ?",
-        args: [targetIdentifier, targetIdentifier, targetIdentifier, targetIdentifier, targetIdentifier]
+        sql: "SELECT * FROM siswa WHERE id = ? OR nis = ? OR rfid_uid = ? OR uid = ?",
+        args: [targetIdentifier, targetIdentifier, targetIdentifier, targetIdentifier]
       });
       if (checkSiswa.rows.length > 0) {
         const s = checkSiswa.rows[0];
@@ -624,7 +668,7 @@ async function handleAbsensiManual(req, res, next) {
 app.post('/api/absensi/manual', handleAbsensiManual);
 app.post('/api/manual-absensi', handleAbsensiManual);
 
-// GET REKAP ABSENSI (MENDUKUNG FILTER PRINTOUT & LAPORAN)
+// GET REKAP ABSENSI
 async function handleGetAbsensi(req, res, next) {
   try {
     await ensureTablesExist();
@@ -655,7 +699,7 @@ async function handleGetAbsensi(req, res, next) {
 
     const result = await db.execute({ sql, args });
     const rows = (result.rows || []).map(a => ({
-      id: a.id || a.rowid,
+      id: a.id,
       rfid_uid: a.rfid_uid || a.rfid || a.uid || '',
       rfid: a.rfid_uid || a.rfid || a.uid || '',
       uid: a.rfid_uid || a.rfid || a.uid || '',
@@ -669,7 +713,17 @@ async function handleGetAbsensi(req, res, next) {
       status: a.keterangan || 'Hadir'
     }));
 
-    return res.json(rows);
+    if (req.query.raw === 'true' || req.query.format === 'array') {
+      return res.json(rows);
+    }
+
+    return res.json({
+      success: true,
+      data: rows,
+      absensi: rows,
+      list: rows,
+      rows: rows
+    });
   } catch (error) {
     next(error);
   }
@@ -679,7 +733,6 @@ app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 app.get('/api/absensi/rekap', handleGetAbsensi);
 app.get('/api/rekap', handleGetAbsensi);
-app.get('/api/rekap-absensi', handleGetAbsensi);
 
 // HAPUS ABSENSI
 app.delete('/api/absensi/:id', async (req, res, next) => {
