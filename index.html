@@ -1,718 +1,366 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistem Absensi RFID SMANKID</title>
-    <!-- Tailwind CSS & FontAwesome -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- SheetJS Excel Library -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistem Presensi RFID Siswa</title>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-100 min-h-screen text-slate-800 font-sans">
+<body class="bg-slate-100 font-sans p-4 md:p-8">
 
-    <!-- 1. HALAMAN LOGIN -->
-    <div id="loginSection" class="min-h-screen flex items-center justify-center p-4">
-        <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-200">
-            <div class="text-center mb-6">
-                <div class="bg-blue-600 text-white w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg text-2xl">
-                    <i class="fa-solid fa-id-card-clip"></i>
-                </div>
-                <h1 class="text-2xl font-bold text-slate-800">Absensi RFID SMANKID</h1>
-                <p class="text-slate-500 text-sm mt-1">Silakan login untuk mengakses sistem</p>
-            </div>
-
-            <form id="loginForm" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-semibold text-slate-700 mb-1">Username</label>
-                    <input type="text" id="loginUsername" required placeholder="Masukkan username"
-                        class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none">
-                </div>
-                <div>
-                    <label class="block text-sm font-semibold text-slate-700 mb-1">Password</label>
-                    <input type="password" id="loginPassword" required placeholder="Masukkan password"
-                        class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none">
-                </div>
-                <button type="submit" id="btnLogin"
-                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg shadow-md transition duration-200">
-                    Login Sistem
-                </button>
-            </form>
-
-            <div id="loginAlert" class="mt-4 p-3 rounded-lg text-sm text-center hidden"></div>
-        </div>
+  <div class="max-w-6xl mx-auto space-y-8">
+    
+    <!-- HEADER -->
+    <div class="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-600">
+      <h1 class="text-2xl font-bold text-gray-800">Sistem Informasi Presensi RFID</h1>
+      <p class="text-gray-500 text-sm">Kelola Data Siswa, Presensi RFID, dan Rekapitulasi</p>
     </div>
 
-    <!-- 2. DASHBOARD APLIKASI -->
-    <div id="dashboardSection" class="hidden">
-        <!-- Header Navigasi -->
-        <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-            <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-                <div class="flex items-center space-x-3">
-                    <div class="bg-blue-600 text-white p-2 rounded-lg text-lg">
-                        <i class="fa-solid fa-id-card-clip"></i>
-                    </div>
-                    <span class="font-bold text-lg text-slate-800">Absensi RFID SMANKID</span>
-                </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      
+      <!-- FORM INPUT & EDIT SISWA -->
+      <div class="bg-white p-6 rounded-xl shadow-md h-fit">
+        <h2 id="form-title" class="text-lg font-bold text-gray-700 mb-4 pb-2 border-b">Tambah Siswa Baru</h2>
+        
+        <form id="form-siswa" onsubmit="saveSiswa(event)" class="space-y-4">
+          <input type="hidden" id="nis" value="">
 
-                <div class="flex items-center space-x-4">
-                    <span class="text-sm font-medium text-slate-600">
-                        <i class="fa-solid fa-user-circle mr-1 text-blue-600"></i>
-                        <span id="navUsername">Admin</span>
-                    </span>
-                    <button id="btnLogout" class="text-xs bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 font-semibold px-3 py-1.5 rounded-lg transition">
-                        <i class="fa-solid fa-right-from-bracket mr-1"></i> Logout
-                    </button>
-                </div>
-            </div>
-        </header>
+          <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1">Nama Siswa <span class="text-red-500">*</span></label>
+            <input type="text" id="nama" required placeholder="Contoh: Budi Santoso" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
 
-        <!-- Tab Navigasi Utama -->
-        <div class="bg-slate-800 text-white">
-            <div class="max-w-7xl mx-auto px-4 flex space-x-2 overflow-x-auto">
-                <button onclick="switchTab('rekap')" id="tabBtnRekap" class="px-4 py-3 text-sm font-medium border-b-2 border-blue-400 text-blue-400 flex items-center whitespace-nowrap">
-                    <i class="fa-solid fa-list-check mr-2"></i> Rekap Absensi
-                </button>
-                <button onclick="switchTab('siswa')" id="tabBtnSiswa" class="px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-300 hover:text-white flex items-center whitespace-nowrap">
-                    <i class="fa-solid fa-graduation-cap mr-2"></i> Data Siswa
-                </button>
-                <button onclick="switchTab('users')" id="tabBtnUsers" class="px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-300 hover:text-white flex items-center whitespace-nowrap">
-                    <i class="fa-solid fa-user-shield mr-2"></i> Kelola User Admin
-                </button>
-                <button onclick="switchTab('tap')" id="tabBtnTap" class="px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-300 hover:text-white flex items-center whitespace-nowrap">
-                    <i class="fa-solid fa-wifi mr-2"></i> Simulasi Tap RFID
-                </button>
-            </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1">Kelas <span class="text-red-500">*</span></label>
+            <input type="text" id="kelas" required placeholder="Contoh: XII IPA 1" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1">Kode / Nomor RFID (Opsional)</label>
+            <input type="text" id="rfid_uid" placeholder="Contoh: 12345678" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+
+          <div class="flex gap-2 pt-2">
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition">Simpan Data</button>
+            <button type="button" id="btn-cancel" onclick="resetForm()" class="hidden bg-gray-400 hover:bg-gray-500 text-white font-semibold px-4 py-2 rounded-lg transition">Batal</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- TABEL DATA SISWA TERDAFTAR -->
+      <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-md">
+        <div class="flex justify-between items-center mb-4 pb-2 border-b">
+          <h2 class="text-lg font-bold text-gray-700">Daftar Siswa Terdaftar</h2>
+          <button onclick="loadSiswa()" class="text-xs bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-700 font-medium">🔄 Refresh</button>
         </div>
 
-        <main class="max-w-7xl mx-auto px-4 py-6">
-
-            <!-- TAB 1: REKAP ABSENSI -->
-            <section id="tabRekap">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                    <div>
-                        <h2 class="text-xl font-bold text-slate-800">Log Kehadiran Siswa</h2>
-                        <p class="text-sm text-slate-500">Data absensi masuk dari alat pemindai RFID</p>
-                    </div>
-                    <button onclick="loadAbsensi()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-semibold px-4 py-2 rounded-lg flex items-center justify-center transition">
-                        <i class="fa-solid fa-rotate mr-2"></i> Refresh Data
-                    </button>
-                </div>
-
-                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold uppercase text-slate-500">
-                                    <th class="p-4">Waktu</th>
-                                    <th class="p-4">Nama Siswa</th>
-                                    <th class="p-4">Kelas</th>
-                                    <th class="p-4">RFID UID</th>
-                                    <th class="p-4">Keterangan</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tableAbsensi" class="divide-y divide-slate-100 text-sm">
-                                <tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data absensi...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- TAB 2: DATA SISWA -->
-            <section id="tabSiswa" class="hidden">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                    <div>
-                        <h2 class="text-xl font-bold text-slate-800">Manajemen Data Siswa</h2>
-                        <p class="text-sm text-slate-500">Kelola NIS, Nama, Kelas, dan Kartu RFID Siswa</p>
-                    </div>
-
-                    <div class="flex items-center space-x-2">
-                        <input type="file" id="fileExcel" accept=".xlsx, .xls, .csv" class="hidden" onchange="processExcelImport(this)">
-                        <button onclick="document.getElementById('fileExcel').click()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-lg flex items-center shadow-sm transition">
-                            <i class="fa-solid fa-file-excel mr-2"></i> Import Excel
-                        </button>
-
-                        <button onclick="openModalSiswa()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg flex items-center shadow-sm transition">
-                            <i class="fa-solid fa-plus mr-2"></i> Tambah Siswa
-                        </button>
-                    </div>
-                </div>
-
-                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold uppercase text-slate-500">
-                                    <th class="p-4">NIS</th>
-                                    <th class="p-4">Nama Lengkap</th>
-                                    <th class="p-4">Kelas</th>
-                                    <th class="p-4">UID RFID</th>
-                                    <th class="p-4 text-right">Aksi</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tableSiswa" class="divide-y divide-slate-100 text-sm">
-                                <tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data siswa...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- TAB 3: KELOLA USER ADMIN -->
-            <section id="tabUsers" class="hidden">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                    <div>
-                        <h2 class="text-xl font-bold text-slate-800">Pengguna & Petugas</h2>
-                        <p class="text-sm text-slate-500">Daftar pengguna yang memiliki akses login sistem</p>
-                    </div>
-                    <button onclick="openModalUser()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg flex items-center shadow-sm transition">
-                        <i class="fa-solid fa-user-plus mr-2"></i> Tambah User
-                    </button>
-                </div>
-
-                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold uppercase text-slate-500">
-                                    <th class="p-4">ID</th>
-                                    <th class="p-4">Username</th>
-                                    <th class="p-4">Nama Lengkap</th>
-                                    <th class="p-4">Role</th>
-                                    <th class="p-4 text-right">Aksi</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tableUsers" class="divide-y divide-slate-100 text-sm">
-                                <tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data user...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- TAB 4: SIMULASI TAP RFID -->
-            <section id="tabTap" class="hidden">
-                <div class="max-w-md mx-auto bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-center">
-                    <div class="text-blue-500 text-4xl mb-3">
-                        <i class="fa-solid fa-wifi animate-pulse"></i>
-                    </div>
-                    <h2 class="text-lg font-bold text-slate-800 mb-1">Penguji Tap RFID</h2>
-                    <p class="text-xs text-slate-500 mb-4">Simulasikan pembacaan kartu RFID via web</p>
-
-                    <form id="formTapRfid" class="space-y-3">
-                        <input type="text" id="tapRfidUid" placeholder="Masukkan UID RFID (Contoh: A1B2C3D4)" required
-                            class="w-full px-4 py-2 border rounded-lg text-center font-mono focus:ring-2 focus:ring-blue-500 outline-none">
-                        <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-lg transition">
-                            <i class="fa-solid fa-paper-plane mr-1"></i> Tap Kartu
-                        </button>
-                    </form>
-                    <div id="alertTap" class="mt-3 p-2.5 rounded-lg text-xs hidden"></div>
-                </div>
-            </section>
-
-        </main>
-    </div>
-
-    <!-- MODAL INPUT SISWA -->
-    <div id="modalSiswa" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
-            <div class="flex justify-between items-center mb-4">
-                <h3 id="modalSiswaTitle" class="text-lg font-bold text-slate-800">Tambah Data Siswa</h3>
-                <button onclick="closeModalSiswa()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
-            </div>
-
-            <form id="formSiswa" class="space-y-4">
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">
-                        NIS (Nomor Induk Siswa)
-                    </label>
-                    <input type="text" id="siswaNis" placeholder="Contoh: 20241001 (Opsional)"
-                        class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">
-                        Nama Lengkap <span class="text-red-500">*</span>
-                    </label>
-                    <input type="text" id="siswaNama" required placeholder="Contoh: Ahmad Subagja"
-                        class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">
-                        Kelas <span class="text-red-500">*</span>
-                    </label>
-                    <input type="text" id="siswaKelas" required placeholder="Contoh: XII IPA 1"
-                        class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">
-                        UID Kartu RFID (Opsional)
-                    </label>
-                    <input type="text" id="siswaRfid" placeholder="Contoh: A1B2C3D4"
-                        class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none">
-                </div>
-
-                <div id="alertSiswa" class="p-2.5 rounded-lg text-xs hidden"></div>
-
-                <div class="flex justify-end space-x-2 pt-2">
-                    <button type="button" onclick="closeModalSiswa()" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg text-sm font-semibold hover:bg-slate-200">
-                        Batal
-                    </button>
-                    <button type="submit" id="btnSaveSiswa" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">
-                        Simpan Data
-                    </button>
-                </div>
-            </form>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm text-gray-600">
+            <thead class="bg-gray-50 text-gray-700 uppercase text-xs">
+              <tr>
+                <th class="p-3">No</th>
+                <th class="p-3">Nama</th>
+                <th class="p-3">Kelas</th>
+                <th class="p-3">RFID UID</th>
+                <th class="p-3 text-center">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="table-siswa" class="divide-y">
+              <tr><td colspan="5" class="p-4 text-center text-gray-400">Memuat data...</td></tr>
+            </tbody>
+          </table>
         </div>
+      </div>
+
     </div>
 
-    <!-- MODAL INPUT USER ADMIN -->
-    <div id="modalUser" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-slate-800">Tambah User Login</h3>
-                <button onclick="closeModalUser()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
-            </div>
+    <!-- FITUR PRESENSI (TAP RFID & MANUAL) -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+      
+      <!-- SIMULASI TAP RFID -->
+      <div class="bg-white p-6 rounded-xl shadow-md">
+        <h2 class="text-lg font-bold text-gray-700 mb-4 pb-2 border-b">Tap Kartu RFID</h2>
+        <form onsubmit="tapRfid(event)" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1">Scan / Masukkan Kode RFID</label>
+            <input type="text" id="tap_rfid" required placeholder="Tempelkan kartu atau ketik UID" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
+          </div>
+          <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg transition">Proses Tap</button>
+        </form>
+      </div>
 
-            <form id="formUser" class="space-y-4">
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">Username <span class="text-red-500">*</span></label>
-                    <input type="text" id="userName" required placeholder="Masukkan username"
-                        class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                </div>
+      <!-- PRESENSI MANUAL -->
+      <div class="bg-white p-6 rounded-xl shadow-md">
+        <h2 class="text-lg font-bold text-gray-700 mb-4 pb-2 border-b">Presensi Manual</h2>
+        <form onsubmit="saveAbsensiManual(event)" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1">Pilih Siswa</label>
+            <select id="select_siswa" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+              <option value="">-- Pilih Siswa --</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1">Keterangan</label>
+            <select id="keterangan" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+              <option value="Hadir">Hadir</option>
+              <option value="Izin">Izin</option>
+              <option value="Sakit">Sakit</option>
+              <option value="Alpha">Alpha</option>
+            </select>
+          </div>
+          <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg transition">Simpan Presensi</button>
+        </form>
+      </div>
 
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">Password <span class="text-red-500">*</span></label>
-                    <input type="password" id="userPass" required placeholder="Masukkan password"
-                        class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1">Nama Lengkap</label>
-                    <input type="text" id="userFullName" placeholder="Nama Petugas / Admin"
-                        class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                </div>
-
-                <div id="alertUser" class="p-2.5 rounded-lg text-xs hidden"></div>
-
-                <div class="flex justify-end space-x-2 pt-2">
-                    <button type="button" onclick="closeModalUser()" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg text-sm font-semibold hover:bg-slate-200">
-                        Batal
-                    </button>
-                    <button type="submit" id="btnSaveUser" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">
-                        Simpan User
-                    </button>
-                </div>
-            </form>
-        </div>
     </div>
 
-    <!-- LOGIKA JAVASCRIPT FRONTEND -->
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const user = JSON.parse(localStorage.getItem('user') || 'null');
-            if (user) {
-                showDashboard(user);
-            }
+    <!-- TABEL REKAP ABSENSI -->
+    <div class="bg-white p-6 rounded-xl shadow-md">
+      <div class="flex justify-between items-center mb-4 pb-2 border-b">
+        <h2 class="text-lg font-bold text-gray-700">Riwayat Presensi Siswa</h2>
+        <button onclick="loadAbsensi()" class="text-xs bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-700 font-medium">🔄 Refresh</button>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-gray-600">
+          <thead class="bg-gray-50 text-gray-700 uppercase text-xs">
+            <tr>
+              <th class="p-3">No</th>
+              <th class="p-3">Nama</th>
+              <th class="p-3">Kelas</th>
+              <th class="p-3">Waktu</th>
+              <th class="p-3">Keterangan</th>
+              <th class="p-3 text-center">Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="table-absensi" class="divide-y">
+            <tr><td colspan="6" class="p-4 text-center text-gray-400">Memuat data...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let listSiswa = [];
+
+    document.addEventListener("DOMContentLoaded", () => {
+      loadSiswa();
+      loadAbsensi();
+    });
+
+    // 1. LOAD DATA SISWA
+    async function loadSiswa() {
+      try {
+        const res = await fetch('/api/siswa');
+        const result = await res.json();
+        
+        const tbody = document.getElementById('table-siswa');
+        const select = document.getElementById('select_siswa');
+        
+        tbody.innerHTML = '';
+        select.innerHTML = '<option value="">-- Pilih Siswa --</option>';
+
+        if (result.success && result.data.length > 0) {
+          listSiswa = result.data;
+          
+          result.data.forEach((siswa, index) => {
+            const rfidVal = siswa.rfid || siswa.rfid_uid || siswa.uid || '-';
+            
+            // Render Tabel
+            tbody.innerHTML += `
+              <tr class="hover:bg-gray-50">
+                <td class="p-3 font-medium text-gray-500">${index + 1}</td>
+                <td class="p-3 font-semibold text-gray-800">${siswa.nama || '-'}</td>
+                <td class="p-3">${siswa.kelas || '-'}</td>
+                <td class="p-3 font-mono text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block my-2">${rfidVal}</td>
+                <td class="p-3 text-center">
+                  <button onclick="editSiswa(${index})" class="text-xs bg-amber-500 hover:bg-amber-600 text-white font-medium px-2.5 py-1 rounded mr-1">Edit</button>
+                  <button onclick="deleteSiswa('${siswa.id || siswa.nis}')" class="text-xs bg-red-500 hover:bg-red-600 text-white font-medium px-2.5 py-1 rounded">Hapus</button>
+                </td>
+              </tr>
+            `;
+
+            // Render Select Option Manual Absen
+            select.innerHTML += `<option value="${siswa.id || siswa.nis}">${siswa.nama} (${siswa.kelas})</option>`;
+          });
+        } else {
+          tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-gray-400">Belum ada siswa terdaftar.</td></tr>';
+        }
+      } catch (err) {
+        console.error("Gagal muat siswa:", err);
+      }
+    }
+
+    // 2. SIMPAN / UPDATE SISWA
+    async function saveSiswa(e) {
+      e.preventDefault();
+      const nis = document.getElementById('nis').value;
+      const nama = document.getElementById('nama').value;
+      const kelas = document.getElementById('kelas').value;
+      const rfid_uid = document.getElementById('rfid_uid').value;
+
+      try {
+        const res = await fetch('/api/siswa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nis, nama, kelas, rfid_uid })
         });
+        const result = await res.json();
 
-        // 1. LOGIN
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('btnLogin');
-            const alertEl = document.getElementById('loginAlert');
+        if (result.success) {
+          alert(result.message);
+          resetForm();
+          loadSiswa();
+        } else {
+          alert("Gagal: " + result.message);
+        }
+      } catch (err) {
+        alert("Terjadi kesalahan jaringan.");
+      }
+    }
 
-            btn.disabled = true;
-            btn.innerText = 'Memproses...';
-            alertEl.classList.add('hidden');
+    // 3. EDIT SISWA
+    function editSiswa(index) {
+      const siswa = listSiswa[index];
+      document.getElementById('form-title').innerText = "Edit Data Siswa";
+      document.getElementById('nis').value = siswa.nis || siswa.id;
+      document.getElementById('nama').value = siswa.nama || '';
+      document.getElementById('kelas').value = siswa.kelas || '';
+      document.getElementById('rfid_uid').value = siswa.rfid || siswa.rfid_uid || '';
+      document.getElementById('btn-cancel').classList.remove('hidden');
+    }
 
-            try {
-                const res = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username: document.getElementById('loginUsername').value.trim(),
-                        password: document.getElementById('loginPassword').value.trim()
-                    })
-                });
+    function resetForm() {
+      document.getElementById('form-title').innerText = "Tambah Siswa Baru";
+      document.getElementById('nis').value = '';
+      document.getElementById('form-siswa').reset();
+      document.getElementById('btn-cancel').classList.add('hidden');
+    }
 
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    localStorage.setItem('user', JSON.stringify(data.user));
-                    showDashboard(data.user);
-                } else {
-                    showAlert(alertEl, data.message || 'Login gagal!', 'error');
-                }
-            } catch (err) {
-                showAlert(alertEl, 'Gagal terhubung ke backend server.', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerText = 'Login Sistem';
-            }
+    // 4. HAPUS SISWA
+    async function deleteSiswa(id) {
+      if (!confirm("Apakah Anda yakin ingin menghapus siswa ini?")) return;
+
+      try {
+        const res = await fetch(`/api/siswa/${id}`, { method: 'DELETE' });
+        const result = await res.json();
+        if (result.success) {
+          alert(result.message);
+          loadSiswa();
+        } else {
+          alert("Gagal menghapus: " + result.message);
+        }
+      } catch (err) {
+        alert("Terjadi kesalahan jaringan.");
+      }
+    }
+
+    // 5. TAP RFID
+    async function tapRfid(e) {
+      e.preventDefault();
+      const rfid_uid = document.getElementById('tap_rfid').value;
+
+      try {
+        const res = await fetch('/api/tap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rfid_uid })
         });
+        const result = await res.json();
 
-        document.getElementById('btnLogout').addEventListener('click', () => {
-            localStorage.removeItem('user');
-            location.reload();
+        if (result.success) {
+          alert(result.message);
+          document.getElementById('tap_rfid').value = '';
+          loadAbsensi();
+        } else {
+          alert("Tap Gagal: " + result.message);
+        }
+      } catch (err) {
+        alert("Terjadi kesalahan sistem.");
+      }
+    }
+
+    // 6. ABSENSI MANUAL
+    async function saveAbsensiManual(e) {
+      e.preventDefault();
+      const siswa_id = document.getElementById('select_siswa').value;
+      const keterangan = document.getElementById('keterangan').value;
+
+      if (!siswa_id) return alert("Pilih siswa terlebih dahulu.");
+
+      try {
+        const res = await fetch('/api/absensi/manual', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ siswa_id, keterangan })
         });
+        const result = await res.json();
 
-        function showDashboard(user) {
-            document.getElementById('loginSection').classList.add('hidden');
-            document.getElementById('dashboardSection').classList.remove('hidden');
-            document.getElementById('navUsername').innerText = user.nama || user.username;
-            loadAbsensi();
+        if (result.success) {
+          alert(result.message);
+          loadAbsensi();
+        } else {
+          alert("Gagal Simpan: " + result.message);
         }
+      } catch (err) {
+        alert("Terjadi kesalahan jaringan.");
+      }
+    }
 
-        // 2. TAB NAVIGASI
-        function switchTab(tabName) {
-            ['rekap', 'siswa', 'users', 'tap'].forEach(t => {
-                const section = document.getElementById(`tab${t.charAt(0).toUpperCase() + t.slice(1)}`);
-                const btn = document.getElementById(`tabBtn${t.charAt(0).toUpperCase() + t.slice(1)}`);
-                if (section) section.classList.add('hidden');
-                if (btn) {
-                    btn.classList.remove('border-blue-400', 'text-blue-400');
-                    btn.classList.add('border-transparent', 'text-slate-300');
-                }
-            });
+    // 7. LOAD REKAP ABSENSI
+    async function loadAbsensi() {
+      try {
+        const res = await fetch('/api/absensi');
+        const result = await res.json();
+        const tbody = document.getElementById('table-absensi');
+        tbody.innerHTML = '';
 
-            const activeSection = document.getElementById(`tab${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`);
-            const activeBtn = document.getElementById(`tabBtn${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`);
-            if (activeSection) activeSection.classList.remove('hidden');
-            if (activeBtn) {
-                activeBtn.classList.add('border-blue-400', 'text-blue-400');
-                activeBtn.classList.remove('border-transparent', 'text-slate-300');
-            }
+        if (result.success && result.data.length > 0) {
+          result.data.forEach((absen, index) => {
+            let statusBadge = 'bg-green-100 text-green-700';
+            if (absen.keterangan === 'Izin') statusBadge = 'bg-yellow-100 text-yellow-700';
+            if (absen.keterangan === 'Sakit') statusBadge = 'bg-blue-100 text-blue-700';
+            if (absen.keterangan === 'Alpha') statusBadge = 'bg-red-100 text-red-700';
 
-            if (tabName === 'rekap') loadAbsensi();
-            if (tabName === 'siswa') loadSiswa();
-            if (tabName === 'users') loadUsers();
+            tbody.innerHTML += `
+              <tr class="hover:bg-gray-50">
+                <td class="p-3 font-medium text-gray-500">${index + 1}</td>
+                <td class="p-3 font-semibold text-gray-800">${absen.nama || '-'}</td>
+                <td class="p-3">${absen.kelas || '-'}</td>
+                <td class="p-3 text-xs text-gray-500">${absen.waktu || '-'}</td>
+                <td class="p-3"><span class="text-xs font-semibold px-2 py-1 rounded ${statusBadge}">${absen.keterangan || 'Hadir'}</span></td>
+                <td class="p-3 text-center">
+                  <button onclick="deleteAbsensi('${absen.id}')" class="text-xs bg-red-500 hover:bg-red-600 text-white font-medium px-2.5 py-1 rounded">Hapus</button>
+                </td>
+              </tr>
+            `;
+          });
+        } else {
+          tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-gray-400">Belum ada riwayat presensi.</td></tr>';
         }
+      } catch (err) {
+        console.error("Gagal muat absensi:", err);
+      }
+    }
 
-        // 3. LOAD ABSENSI
-        async function loadAbsensi() {
-            const tbody = document.getElementById('tableAbsensi');
-            tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data...</td></tr>';
+    // 8. HAPUS REKAP ABSENSI
+    async function deleteAbsensi(id) {
+      if (!confirm("Hapus catatan presensi ini?")) return;
 
-            try {
-                const res = await fetch('/api/absensi');
-                const data = await res.json();
-
-                if (data.success && data.data.length > 0) {
-                    tbody.innerHTML = data.data.map(a => `
-                        <tr class="hover:bg-slate-50 border-b border-slate-100">
-                            <td class="p-4 font-mono text-xs text-slate-500">${new Date(a.waktu).toLocaleString('id-ID')}</td>
-                            <td class="p-4 font-semibold text-slate-800">${escapeHtml(a.nama || '-')}</td>
-                            <td class="p-4 text-slate-600">${escapeHtml(a.kelas || '-')}</td>
-                            <td class="p-4 font-mono text-xs text-slate-500">${escapeHtml(a.rfid_uid || '-')}</td>
-                            <td class="p-4"><span class="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full text-xs font-semibold">Hadir</span></td>
-                        </tr>
-                    `).join('');
-                } else {
-                    tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-400">Belum ada riwayat absensi.</td></tr>';
-                }
-            } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-red-500">Gagal mengambil data absensi.</td></tr>';
-            }
+      try {
+        const res = await fetch(`/api/absensi/${id}`, { method: 'DELETE' });
+        const result = await res.json();
+        if (result.success) {
+          loadAbsensi();
+        } else {
+          alert("Gagal menghapus.");
         }
-
-        // 4. LOAD DATA SISWA
-        async function loadSiswa() {
-            const tbody = document.getElementById('tableSiswa');
-            tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data...</td></tr>';
-
-            try {
-                const res = await fetch('/api/siswa');
-                const data = await res.json();
-
-                if (data.success && data.data.length > 0) {
-                    tbody.innerHTML = data.data.map(s => `
-                        <tr class="hover:bg-slate-50 border-b border-slate-100">
-                            <td class="p-4 font-mono text-xs font-bold text-slate-700">${escapeHtml(s.nis || '-')}</td>
-                            <td class="p-4 font-semibold text-slate-800">${escapeHtml(s.nama)}</td>
-                            <td class="p-4 text-slate-600">${escapeHtml(s.kelas)}</td>
-                            <td class="p-4 font-mono text-xs text-slate-500">${s.rfid_uid ? escapeHtml(s.rfid_uid) : '<span class="text-slate-300">Belum Terdaftar</span>'}</td>
-                            <td class="p-4 text-right space-x-2">
-                                <button onclick="editSiswa('${escapeHtml(s.nis || '')}', '${escapeHtml(s.nama || '')}', '${escapeHtml(s.kelas || '')}', '${escapeHtml(s.rfid_uid || '')}')" class="text-blue-600 hover:text-blue-800 font-semibold text-xs">
-                                    <i class="fa-solid fa-pen"></i> Edit
-                                </button>
-                                <button onclick="deleteSiswa('${s.id}')" class="text-red-600 hover:text-red-800 font-semibold text-xs">
-                                    <i class="fa-solid fa-trash"></i> Hapus
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('');
-                } else {
-                    tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-400">Belum ada data siswa.</td></tr>';
-                }
-            } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-red-500">Gagal mengambil data siswa.</td></tr>';
-            }
-        }
-
-        // 5. INPUT / EDIT SISWA
-        function openModalSiswa() {
-            document.getElementById('modalSiswaTitle').innerText = 'Tambah Data Siswa';
-            document.getElementById('formSiswa').reset();
-            document.getElementById('siswaNis').readOnly = false;
-            document.getElementById('alertSiswa').classList.add('hidden');
-            document.getElementById('modalSiswa').classList.remove('hidden');
-        }
-
-        function closeModalSiswa() {
-            document.getElementById('modalSiswa').classList.add('hidden');
-        }
-
-        function editSiswa(nis, nama, kelas, rfid) {
-            openModalSiswa();
-            document.getElementById('modalSiswaTitle').innerText = 'Edit Data Siswa';
-            document.getElementById('siswaNis').value = nis;
-            document.getElementById('siswaNis').readOnly = true;
-            document.getElementById('siswaNama').value = nama;
-            document.getElementById('siswaKelas').value = kelas;
-            document.getElementById('siswaRfid').value = rfid || '';
-        }
-
-        async function deleteSiswa(id) {
-            if (!confirm('Apakah Anda yakin ingin menghapus siswa ini?')) return;
-            try {
-                const res = await fetch(`/api/siswa/${id}`, { method: 'DELETE' });
-                const data = await res.json();
-                if (data.success) {
-                    loadSiswa();
-                } else {
-                    alert(data.message || 'Gagal menghapus siswa');
-                }
-            } catch(e) {
-                alert('Terjadi kesalahan koneksi.');
-            }
-        }
-
-        document.getElementById('formSiswa').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('btnSaveSiswa');
-            const alertEl = document.getElementById('alertSiswa');
-
-            const nisVal = (document.getElementById('siswaNis').value || '').trim();
-            const namaVal = (document.getElementById('siswaNama').value || '').trim();
-            const kelasVal = (document.getElementById('siswaKelas').value || '').trim();
-            const rfidVal = (document.getElementById('siswaRfid').value || '').trim();
-
-            if (!namaVal || !kelasVal) {
-                showAlert(alertEl, 'Silakan isi Nama dan Kelas terlebih dahulu!', 'error');
-                return;
-            }
-
-            btn.disabled = true;
-            btn.innerText = 'Menyimpan...';
-
-            try {
-                const res = await fetch('/api/siswa', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        nis: nisVal,
-                        nama: namaVal,
-                        kelas: kelasVal,
-                        rfid_uid: rfidVal || null
-                    })
-                });
-
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    closeModalSiswa();
-                    loadSiswa();
-                } else {
-                    showAlert(alertEl, data.message || 'Gagal menyimpan data siswa.', 'error');
-                }
-            } catch (err) {
-                showAlert(alertEl, `Terjadi kesalahan: ${err.message}`, 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerText = 'Simpan Data';
-            }
-        });
-
-        // 6. KELOLA USER ADMIN
-        async function loadUsers() {
-            const tbody = document.getElementById('tableUsers');
-            tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-400">Memuat data...</td></tr>';
-
-            try {
-                const res = await fetch('/api/users');
-                const data = await res.json();
-
-                if (data.success && data.data.length > 0) {
-                    tbody.innerHTML = data.data.map(u => `
-                        <tr class="hover:bg-slate-50 border-b border-slate-100">
-                            <td class="p-4 font-mono text-xs text-slate-500">${u.id}</td>
-                            <td class="p-4 font-semibold text-slate-800">${escapeHtml(u.username)}</td>
-                            <td class="p-4 text-slate-600">${escapeHtml(u.nama || '-')}</td>
-                            <td class="p-4"><span class="bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full text-xs font-semibold">${escapeHtml(u.role)}</span></td>
-                            <td class="p-4 text-right">
-                                <button onclick="deleteUser('${u.id}')" class="text-red-600 hover:text-red-800 font-semibold text-xs">
-                                    <i class="fa-solid fa-trash"></i> Hapus
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('');
-                } else {
-                    tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-400">Belum ada user.</td></tr>';
-                }
-            } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-red-500">Gagal mengambil data user.</td></tr>';
-            }
-        }
-
-        function openModalUser() {
-            document.getElementById('formUser').reset();
-            document.getElementById('alertUser').classList.add('hidden');
-            document.getElementById('modalUser').classList.remove('hidden');
-        }
-
-        function closeModalUser() {
-            document.getElementById('modalUser').classList.add('hidden');
-        }
-
-        document.getElementById('formUser').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('btnSaveUser');
-            const alertEl = document.getElementById('alertUser');
-
-            btn.disabled = true;
-            btn.innerText = 'Menyimpan...';
-
-            try {
-                const res = await fetch('/api/users', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username: document.getElementById('userName').value.trim(),
-                        password: document.getElementById('userPass').value.trim(),
-                        nama: document.getElementById('userFullName').value.trim()
-                    })
-                });
-
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    closeModalUser();
-                    loadUsers();
-                } else {
-                    showAlert(alertEl, data.message || 'Gagal menyimpan user.', 'error');
-                }
-            } catch (err) {
-                showAlert(alertEl, 'Gagal terhubung ke server.', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerText = 'Simpan User';
-            }
-        });
-
-        async function deleteUser(id) {
-            if (!confirm('Yakin ingin menghapus user ini?')) return;
-            try {
-                const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
-                const data = await res.json();
-                if (data.success) {
-                    loadUsers();
-                } else {
-                    alert(data.message || 'Gagal menghapus user');
-                }
-            } catch(e) {
-                alert('Terjadi kesalahan koneksi.');
-            }
-        }
-
-        // 7. IMPORT EXCEL
-        function processExcelImport(fileInput) {
-            const file = fileInput.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    const sheetName = workbook.SheetNames[0];
-                    const sheet = workbook.Sheets[sheetName];
-
-                    const jsonRows = XLSX.utils.sheet_to_json(sheet);
-
-                    if (!jsonRows || jsonRows.length === 0) {
-                        alert('File Excel kosong atau format tidak dikenali.');
-                        return;
-                    }
-
-                    const res = await fetch('/api/siswa/import', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(jsonRows)
-                    });
-
-                    const result = await res.json();
-                    if (res.ok && result.success) {
-                        alert(result.message);
-                        loadSiswa();
-                    } else {
-                        alert(result.message || 'Gagal mengimpor file Excel.');
-                    }
-                } catch (err) {
-                    alert('Gagal membaca file Excel. Pastikan format file .xlsx atau .csv');
-                } finally {
-                    fileInput.value = '';
-                }
-            };
-            reader.readAsArrayBuffer(file);
-        }
-
-        // 8. SIMULASI TAP RFID
-        document.getElementById('formTapRfid').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const alertEl = document.getElementById('alertTap');
-            const rfid = document.getElementById('tapRfidUid').value.trim();
-
-            try {
-                const res = await fetch('/api/tap', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rfid_uid: rfid })
-                });
-
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    showAlert(alertEl, data.message, 'success');
-                    document.getElementById('tapRfidUid').value = '';
-                } else {
-                    showAlert(alertEl, data.message || 'Gagal Tap Kartu.', 'error');
-                }
-            } catch (err) {
-                showAlert(alertEl, 'Gagal terhubung ke server.', 'error');
-            }
-        });
-
-        // UTILITY HELPERS
-        function showAlert(el, text, type) {
-            el.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-emerald-100', 'text-emerald-700');
-            if (type === 'success') {
-                el.classList.add('bg-emerald-100', 'text-emerald-700');
-            } else {
-                el.classList.add('bg-red-100', 'text-red-700');
-            }
-            el.innerText = text;
-        }
-
-        function escapeHtml(str) {
-            if (!str) return '';
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#039;');
-        }
-    </script>
+      } catch (err) {
+        alert("Terjadi kesalahan jaringan.");
+      }
+    }
+  </script>
 </body>
 </html>
