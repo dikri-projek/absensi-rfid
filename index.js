@@ -4,15 +4,7 @@ const { createClient } = require('@libsql/client/http');
 
 const app = express();
 
-// 1. Pembersih URL Rewrite Vercel (Menghapus prefix /index.js dari rute)
-app.use((req, res, next) => {
-  if (req.url.startsWith('/index.js')) {
-    req.url = req.url.replace('/index.js', '') || '/';
-  }
-  next();
-});
-
-// 2. CORS Middleware
+// 1. CORS Middleware
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -23,11 +15,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// 3. Body Parser Middleware
+// 2. Body Parser Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 4. Inisialisasi Database Turso HTTP Safe
+// 3. Inisialisasi Database Turso HTTP Safe
 function getDb() {
   let url = (process.env.TURSO_DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
   let authToken = (process.env.TURSO_AUTH_TOKEN || '').trim().replace(/^["']|["']$/g, '');
@@ -47,7 +39,7 @@ function getDb() {
   return createClient({ url, authToken });
 }
 
-// 5. Inisialisasi Tabel & User Admin
+// 4. Inisialisasi Tabel & User Admin
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
@@ -327,15 +319,15 @@ async function handleGetAbsensi(req, res, next) {
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 
-// Serve Static Files
-app.use(express.static(path.join(__dirname, 'public'), { redirect: false }));
+// Serve Static Frontend Files
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Fallback 404 khusus endpoint /api (selalu kembalikan respon JSON, bukan HTML)
+// Catch-All Endpoint API 404
 app.all('/api/*', (req, res) => {
   res.status(404).json({ success: false, message: `Endpoint API ${req.originalUrl} tidak ditemukan.` });
 });
 
-// SPA Fallback untuk halaman Frontend
+// Fallback untuk SPA Frontend
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
