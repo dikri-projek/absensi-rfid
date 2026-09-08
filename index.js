@@ -206,7 +206,92 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
 });
 
-// GET LIST SISWA (Aman & Kompatibel)
+// LOGIN USER
+app.post('/api/login', async (req, res, next) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const body = parseRequestBody(req);
+
+    const username = cleanStr(body.username);
+    const password = cleanStr(body.password);
+
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: "Username dan password tidak boleh kosong." });
+    }
+
+    const result = await db.execute({
+      sql: "SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(?) AND TRIM(password) = ?",
+      args: [username, password]
+    });
+
+    if (result.rows.length > 0) {
+      return res.json({ success: true, message: "Login berhasil!", user: result.rows[0] });
+    }
+
+    return res.status(401).json({ success: false, message: "Username atau password salah." });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET LIST USERS
+app.get('/api/users', async (req, res, next) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const result = await db.execute("SELECT id, username, nama, role FROM users ORDER BY id DESC");
+    return res.json({ success: true, data: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// TAMBAH USER
+app.post('/api/users', async (req, res, next) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const body = parseRequestBody(req);
+
+    const username = cleanStr(body.username);
+    const password = cleanStr(body.password);
+    const nama = cleanStr(body.nama) || username || 'Administrator';
+    const role = cleanStr(body.role) || 'admin';
+
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: "Username dan Password wajib diisi!" });
+    }
+
+    await db.execute({
+      sql: "INSERT OR REPLACE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
+      args: [username, password, nama, role]
+    });
+    return res.json({ success: true, message: "User berhasil disimpan!" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// HAPUS USER
+app.delete('/api/users/:id', async (req, res, next) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const { id } = req.params;
+
+    await db.execute({
+      sql: "DELETE FROM users WHERE id = ?",
+      args: [id]
+    });
+
+    return res.json({ success: true, message: "User berhasil dihapus!" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET LIST SISWA
 app.get('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -243,7 +328,7 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// SIMPAN / UPDATE SISWA (OTOMATIS UPDATE JIKA SUDAH ADA)
+// SIMPAN / UPDATE SISWA
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -262,7 +347,6 @@ app.post('/api/siswa', async (req, res, next) => {
       });
     }
 
-    // Cek apakah siswa/RFID sudah ada di DB
     let existingSiswa = null;
     if (rfid_uid) {
       const checkRfid = await db.execute({
@@ -281,7 +365,6 @@ app.post('/api/siswa', async (req, res, next) => {
     }
 
     if (existingSiswa) {
-      // JIKA SUDAH ADA: OTOMATIS UPDATE DATA
       const targetNis = existingSiswa.nis || nis || ('NIS-' + Date.now());
       const targetId = existingSiswa.id || existingSiswa.rowid || targetNis;
 
@@ -292,7 +375,6 @@ app.post('/api/siswa', async (req, res, next) => {
 
       return res.json({ success: true, message: `Data siswa '${nama}' berhasil diperbarui!` });
     } else {
-      // JIKA BELUM ADA: INSERT SISWA BARU
       if (!nis) {
         nis = 'NIS-' + Date.now().toString().slice(-6);
       }
