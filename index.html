@@ -401,10 +401,10 @@
                     closeModalSiswa();
                     loadSiswa();
                 } else {
-                    showAlert(alertEl, data.message || 'Gagal menyimpan data.', 'error');
+                    showAlert(alertEl, data.message || 'Gagal menyimpan data siswa.', 'error');
                 }
             } catch (err) {
-                showAlert(alertEl, 'Terjadi kesalahan koneksi server.', 'error');
+                showAlert(alertEl, `Terjadi kesalahan: ${err.message}`, 'error');
             } finally {
                 btn.disabled = false;
                 btn.innerText = 'Simpan Data';
