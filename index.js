@@ -1,11 +1,10 @@
 const express = require('express');
 const path = require('path');
-// Menggunakan driver HTTP murni agar 100% stabil di Vercel Serverless tanpa error migration jobs 400
 const { createClient } = require('@libsql/client/http');
 
 const app = express();
 
-// 1. Fix Otomatis Rewrite URL dari Vercel
+// 1. Pembersih URL Rewrite Vercel (Menghapus prefix /index.js dari rute)
 app.use((req, res, next) => {
   if (req.url.startsWith('/index.js')) {
     req.url = req.url.replace('/index.js', '') || '/';
@@ -13,7 +12,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// 2. CORS Middleware (Izin Akses Frontend)
+// 2. CORS Middleware
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -28,7 +27,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 4. Inisialisasi Database Turso HTTP Safe & Sanitasi URL Otomatis
+// 4. Inisialisasi Database Turso HTTP Safe
 function getDb() {
   let url = (process.env.TURSO_DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
   let authToken = (process.env.TURSO_AUTH_TOKEN || '').trim().replace(/^["']|["']$/g, '');
@@ -37,12 +36,10 @@ function getDb() {
     throw new Error("TURSO_DATABASE_URL belum diatur atau kosong pada Environment Variables Vercel.");
   }
 
-  // Konversi protokol libsql:// ke https:// untuk koneksi HTTP serverless
   if (url.startsWith('libsql://')) {
     url = url.replace('libsql://', 'https://');
   }
 
-  // Bersihkan karakter garis miring di akhir URL jika ada
   if (url.endsWith('/')) {
     url = url.slice(0, -1);
   }
@@ -50,14 +47,13 @@ function getDb() {
   return createClient({ url, authToken });
 }
 
-// 5. Inisialisasi Tabel & Akun Admin Default Otomatis
+// 5. Inisialisasi Tabel & User Admin
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
 
   const db = getDb();
 
-  // Tabel Users
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +64,6 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Tabel Siswa
   await db.execute(`
     CREATE TABLE IF NOT EXISTS siswa (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,7 +74,6 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Tabel Absensi
   await db.execute(`
     CREATE TABLE IF NOT EXISTS absensi (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +85,6 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Buat User Admin Default Jika Belum Ada
   await db.execute({
     sql: "INSERT OR IGNORE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
     args: ['admin', 'admin', 'Administrator', 'admin']
@@ -100,7 +93,6 @@ async function ensureTablesExist() {
   isInitialized = true;
 }
 
-// Helper Sanitasi RFID
 function sanitizeRfid(val) {
   if (!val) return null;
   const str = String(val).trim();
@@ -154,7 +146,7 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 4. SISWA (TAMBAH / UPDATE MANUAL)
+// 4. SISWA (TAMBAH / UPDATE)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -175,7 +167,7 @@ app.post('/api/siswa', async (req, res, next) => {
   }
 });
 
-// 5. IMPORT SISWA SEKALIGUS (/api/siswa/import & /api/siswa/bulk)
+// 5. IMPORT SISWA SEKALIGUS
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
@@ -256,7 +248,7 @@ app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
   }
 });
 
-// 8. USERS (GET ALL & POST TAMBAH USER)
+// 8. USERS (GET ALL & POST TAMBAH)
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -335,18 +327,17 @@ async function handleGetAbsensi(req, res, next) {
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 
-// Serve Frontend Static Files
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve Static Files
+app.use(express.static(path.join(__dirname, 'public'), { redirect: false }));
 
-// SPA Fallback: arahkan halaman web non-API ke index.html
-app.get('*', (req, res, next) => {
-  if (req.originalUrl.startsWith('/api')) return next();
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// Fallback 404 khusus endpoint /api (selalu kembalikan respon JSON, bukan HTML)
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ success: false, message: `Endpoint API ${req.originalUrl} tidak ditemukan.` });
 });
 
-// Catch-All Endpoint API 404
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ success: false, message: `Endpoint ${req.originalUrl} tidak ditemukan.` });
+// SPA Fallback untuk halaman Frontend
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Global Error Handler
@@ -358,7 +349,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Export Serverless Vercel & Run Lokal
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => console.log(`Server aktif di port ${PORT}`));
