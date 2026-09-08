@@ -143,7 +143,7 @@ function cleanStr(val) {
   return str;
 }
 
-// 4. Inisialisasi Tabel & Akun Default Admin
+// 4. Inisialisasi Database & Auto Seed Data Contoh jika Kosong
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
@@ -173,6 +173,16 @@ async function ensureTablesExist() {
     );
   `);
 
+  // Pastikan Kolom Siswa Lengkap (Auto Migration)
+  const columnsToAdd = ['nis', 'nama', 'kelas', 'rfid_uid', 'uid'];
+  for (const col of columnsToAdd) {
+    try {
+      await db.execute(`ALTER TABLE siswa ADD COLUMN ${col} TEXT;`);
+    } catch (e) {
+      // Kolom sudah ada
+    }
+  }
+
   // Tabel Absensi
   await db.execute(`
     CREATE TABLE IF NOT EXISTS absensi (
@@ -194,21 +204,39 @@ async function ensureTablesExist() {
         args: ['admin', 'admin123', 'Administrator Utama', 'admin']
       });
     }
-  } catch (err) {
-    console.log("Info user admin check/insert:", err.message);
-  }
+  } catch (err) {}
+
+  // Auto Seed 4 Siswa Contoh jika database benar-benar kosong
+  try {
+    const checkSiswa = await db.execute("SELECT COUNT(*) as total FROM siswa");
+    let totalSiswa = 0;
+    if (checkSiswa.rows && checkSiswa.rows.length > 0) {
+      totalSiswa = Number(checkSiswa.rows[0].total || checkSiswa.rows[0]['COUNT(*)'] || 0);
+    }
+
+    if (totalSiswa === 0) {
+      const sampleStudents = [
+        { nis: '1001', nama: 'Ahmad Rizky', kelas: '10 IPA 1', rfid: 'RFID1001' },
+        { nis: '1002', nama: 'Siti Rahma', kelas: '10 IPA 1', rfid: 'RFID1002' },
+        { nis: '1003', nama: 'Budi Santoso', kelas: '10 IPA 2', rfid: 'RFID1003' },
+        { nis: '1004', nama: 'Dewi Lestari', kelas: '11 IPA 1', rfid: 'RFID1004' }
+      ];
+      for (const s of sampleStudents) {
+        await db.execute({
+          sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
+          args: [s.nis, s.nama, s.kelas, s.rfid, s.rfid]
+        });
+      }
+    }
+  } catch (err) {}
 
   isInitialized = true;
 }
 
-// 5. API ENDPOINTS
+// 5. HANDLERS API
 
-app.get('/api/ping', (req, res) => {
-  res.json({ status: "OK", message: "Server aktif!" });
-});
-
-// API LOGIN USER / ADMIN
-app.post('/api/login', async (req, res) => {
+// LOGIN
+async function handleLogin(req, res) {
   try {
     await ensureTablesExist();
     const db = getDb();
@@ -243,13 +271,94 @@ app.post('/api/login', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Login Error:", error.message);
     return res.status(500).json({ success: false, message: "Gagal login: " + error.message });
   }
-});
+}
 
-// REPAIR DATABASE (DROPS & RECREATES TABEL SISWA DAN USERS)
-app.post('/api/repair-db', async (req, res) => {
+// GET DAFTAR SISWA (Mendukung Multi Format)
+async function handleGetSiswa(req, res) {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    
+    const result = await db.execute("SELECT * FROM siswa ORDER BY id DESC");
+    const rows = result.rows || [];
+
+    const formattedData = rows.map((s, idx) => ({
+      id: s.id || s.nis || (idx + 1),
+      nis: s.nis || s.nisn || '-',
+      nama: s.nama || s.nama_siswa || s.name || 'Tanpa Nama',
+      kelas: s.kelas || s.kelas_siswa || s.rombel || '-',
+      rfid_uid: s.rfid_uid || s.rfid || s.uid || '-'
+    }));
+
+    if (req.query.format === 'array' || req.query.raw === 'true') {
+      return res.json(formattedData);
+    }
+
+    return res.json({
+      success: true,
+      status: "success",
+      data: formattedData,
+      siswa: formattedData,
+      students: formattedData,
+      total: formattedData.length
+    });
+  } catch (error) {
+    console.error("GET Siswa Error:", error.message);
+    if (req.query.format === 'array' || req.query.raw === 'true') {
+      return res.status(500).json([]);
+    }
+    return res.status(500).json({ success: false, message: error.message, data: [], siswa: [], students: [] });
+  }
+}
+
+// SIMPAN / UPDATE SISWA
+async function handleSaveOrUpdateSiswa(req, res) {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const body = parseRequestBody(req);
+
+    let targetId = req.params.id || body.id || body.siswa_id;
+    if (targetId && (targetId === 'null' || targetId === 'undefined' || String(targetId).trim() === '')) {
+      targetId = null;
+    }
+
+    const nama = cleanStr(body.nama || body.nama_siswa || body.name);
+    const kelas = cleanStr(body.kelas || body.kelas_siswa || body.rombel);
+    const rfid_uid = sanitizeRfid(body.rfid_uid || body.rfid || body.uid);
+    const nis = cleanStr(body.nis || body.nisn);
+
+    if (!nama || !kelas) {
+      return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi!" });
+    }
+
+    const finalNis = nis || ('NIS-' + Date.now().toString().slice(-6));
+    const finalRfid = rfid_uid || finalNis;
+
+    if (targetId) {
+      await db.execute({
+        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ? OR nis = ?",
+        args: [nama, kelas, finalRfid, finalRfid, finalNis, targetId, targetId]
+      });
+      return res.json({ success: true, message: `Data '${nama}' berhasil diperbarui!` });
+    }
+
+    await db.execute({
+      sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
+      args: [finalNis, nama, kelas, finalRfid, finalRfid]
+    });
+
+    return res.json({ success: true, message: `Siswa '${nama}' berhasil disimpan!` });
+  } catch (error) {
+    console.error("Save Siswa Error:", error.message);
+    return res.status(500).json({ success: false, message: "Gagal menyimpan ke database: " + error.message });
+  }
+}
+
+// REPARASI DATABASE TOTAL
+async function handleRepairDb(req, res) {
   try {
     const db = getDb();
     await db.execute("DROP TABLE IF EXISTS siswa");
@@ -264,7 +373,6 @@ app.post('/api/repair-db', async (req, res) => {
       );
     `);
 
-    // Reset user admin juga
     await db.execute("DROP TABLE IF EXISTS users");
     await db.execute(`
       CREATE TABLE users (
@@ -280,15 +388,41 @@ app.post('/api/repair-db', async (req, res) => {
       args: ['admin', 'admin123', 'Administrator Utama', 'admin']
     });
 
+    const sampleStudents = [
+      { nis: '1001', nama: 'Ahmad Rizky', kelas: '10 IPA 1', rfid: 'RFID1001' },
+      { nis: '1002', nama: 'Siti Rahma', kelas: '10 IPA 1', rfid: 'RFID1002' },
+      { nis: '1003', nama: 'Budi Santoso', kelas: '10 IPA 2', rfid: 'RFID1003' },
+      { nis: '1004', nama: 'Dewi Lestari', kelas: '11 IPA 1', rfid: 'RFID1004' }
+    ];
+    for (const s of sampleStudents) {
+      await db.execute({
+        sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
+        args: [s.nis, s.nama, s.kelas, s.rfid, s.rfid]
+      });
+    }
+
     isInitialized = true;
-    return res.json({ success: true, message: "Database direparasi! User default: admin | Password: admin123" });
+    return res.json({ success: true, message: "Database direparasi & diisi 4 data siswa! User: admin | Pass: admin123" });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Gagal reparasi: " + error.message });
   }
-});
+}
+
+// 6. ROUTE ALIASING (Bisa Dipanggil Lewat Berbagai Nama URL)
+
+app.get('/api/ping', (req, res) => res.json({ status: "OK", message: "Server aktif!" }));
+
+app.post(['/api/login', '/login'], handleLogin);
+
+app.get(['/api/siswa', '/siswa', '/api/students', '/api/siswa/list'], handleGetSiswa);
+app.post(['/api/siswa', '/siswa', '/api/students', '/api/siswa/add', '/api/siswa/simpan'], handleSaveOrUpdateSiswa);
+app.put(['/api/siswa', '/siswa', '/api/students', '/api/siswa/:id'], handleSaveOrUpdateSiswa);
+app.post(['/api/siswa/:id', '/siswa/:id'], handleSaveOrUpdateSiswa);
+
+app.post('/api/repair-db', handleRepairDb);
 
 // GET DAFTAR KELAS
-app.get('/api/kelas', async (req, res) => {
+app.get(['/api/kelas', '/kelas'], async (req, res) => {
   try {
     await ensureTablesExist();
     const db = getDb();
@@ -307,99 +441,12 @@ app.get('/api/kelas', async (req, res) => {
   } catch (error) {
     return res.json({
       success: true,
-      kelas: [
-        "10 IPA 1", "10 IPA 2", "10 IPS 1", "10 IPS 2",
-        "11 IPA 1", "11 IPA 2", "11 IPS 1", "11 IPS 2",
-        "12 IPA 1", "12 IPA 2", "12 IPS 1", "12 IPS 2"
-      ]
+      kelas: ["10 IPA 1", "10 IPA 2", "10 IPS 1", "10 IPS 2", "11 IPA 1", "11 IPA 2", "11 IPS 1", "11 IPS 2", "12 IPA 1", "12 IPA 2", "12 IPS 1", "12 IPS 2"]
     });
   }
 });
 
-// GET SISWA
-app.get('/api/siswa', async (req, res) => {
-  try {
-    await ensureTablesExist();
-    const db = getDb();
-    
-    const result = await db.execute("SELECT * FROM siswa ORDER BY id DESC");
-    const rows = result.rows || [];
-
-    const formattedData = rows.map((s, idx) => ({
-      id: s.id || s.nis || (idx + 1),
-      nis: s.nis || '-',
-      nama: s.nama || s.nama_siswa || s.name || 'Tanpa Nama',
-      kelas: s.kelas || s.kelas_siswa || '-',
-      rfid_uid: s.rfid_uid || s.uid || '-'
-    }));
-
-    return res.json({
-      success: true,
-      data: formattedData,
-      siswa: formattedData
-    });
-  } catch (error) {
-    console.error("GET /api/siswa Error:", error.message);
-    return res.status(500).json({ success: false, message: error.message, data: [], siswa: [] });
-  }
-});
-
-// SIMPAN / EDIT SISWA
-async function handleSaveOrUpdateSiswa(req, res) {
-  try {
-    await ensureTablesExist();
-    const db = getDb();
-    const body = parseRequestBody(req);
-
-    const paramId = req.params.id;
-    const bodyId = body.id || body.siswa_id;
-    const targetId = paramId || bodyId;
-
-    const nama = cleanStr(body.nama || body.nama_siswa || body.name);
-    const kelas = cleanStr(body.kelas || body.kelas_siswa || body.rombel);
-    const rfid_uid = sanitizeRfid(body.rfid_uid || body.rfid || body.uid);
-    const nis = cleanStr(body.nis);
-
-    if (!nama || !kelas) {
-      return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi!" });
-    }
-
-    const finalNis = nis || ('NIS-' + Date.now().toString().slice(-6));
-    const finalRfid = rfid_uid || finalNis;
-
-    if (targetId) {
-      await db.execute({
-        sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ?, uid = ?, nis = ? WHERE id = ? OR nis = ?",
-        args: [nama, kelas, finalRfid, finalRfid, finalNis, targetId, targetId]
-      });
-      return res.json({ success: true, message: `Data '${nama}' berhasil diperbarui!` });
-    }
-
-    try {
-      await db.execute({
-        sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid, uid) VALUES (?, ?, ?, ?, ?)",
-        args: [finalNis, nama, kelas, finalRfid, finalRfid]
-      });
-    } catch (insertErr) {
-      await db.execute({
-        sql: "UPDATE siswa SET nama = ?, kelas = ? WHERE rfid_uid = ? OR uid = ? OR nis = ?",
-        args: [nama, kelas, finalRfid, finalRfid, finalNis]
-      });
-    }
-
-    return res.json({ success: true, message: `Siswa '${nama}' berhasil disimpan!` });
-  } catch (error) {
-    console.error("Save Siswa Error:", error.message);
-    return res.status(500).json({ success: false, message: "Gagal menyimpan ke database: " + error.message });
-  }
-}
-
-app.post('/api/siswa', handleSaveOrUpdateSiswa);
-app.put('/api/siswa', handleSaveOrUpdateSiswa);
-app.post('/api/siswa/:id', handleSaveOrUpdateSiswa);
-app.put('/api/siswa/:id', handleSaveOrUpdateSiswa);
-
-// SEED CONTOH DATA SISWA
+// SEED SAMPLE SISWA
 app.post('/api/siswa/seed', async (req, res) => {
   try {
     await ensureTablesExist();
@@ -426,7 +473,7 @@ app.post('/api/siswa/seed', async (req, res) => {
 });
 
 // HAPUS SISWA
-app.delete('/api/siswa/:id', async (req, res) => {
+app.delete(['/api/siswa/:id', '/siswa/:id'], async (req, res) => {
   try {
     await ensureTablesExist();
     const db = getDb();
@@ -444,7 +491,7 @@ app.delete('/api/siswa/:id', async (req, res) => {
 });
 
 // GET REKAP ABSENSI
-app.get('/api/absensi', async (req, res) => {
+app.get(['/api/absensi', '/absensi'], async (req, res) => {
   try {
     await ensureTablesExist();
     const db = getDb();
@@ -466,7 +513,7 @@ app.get('/api/absensi', async (req, res) => {
 });
 
 // TAP RFID PRESENSI
-app.post('/api/tap', async (req, res) => {
+app.post(['/api/tap', '/tap'], async (req, res) => {
   try {
     await ensureTablesExist();
     const db = getDb();
@@ -498,7 +545,7 @@ app.post('/api/tap', async (req, res) => {
   }
 });
 
-// SERVE STATIC
+// STATIC FILES SERVING
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('*', (req, res) => {
