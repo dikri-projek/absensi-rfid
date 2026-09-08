@@ -18,6 +18,27 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Helper Parsing Body Teraman (Handling Buffer/String/Object di Vercel)
+function parseRequestBody(req) {
+  let body = req.body;
+  if (!body) return {};
+  
+  if (Buffer.isBuffer(body)) {
+    try {
+      body = JSON.parse(body.toString('utf-8'));
+    } catch (e) {
+      body = {};
+    }
+  } else if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch (e) {
+      body = {};
+    }
+  }
+  return body || {};
+}
+
 // 3. Native Turso HTTP Driver
 async function tursoQuery(stmt) {
   let sql = "";
@@ -100,7 +121,7 @@ function getDb() {
   return { execute: tursoQuery };
 }
 
-// 4. Helper & Pembersihan Data RFID
+// 4. Helper Clean RFID
 function sanitizeRfid(val) {
   if (val === null || val === undefined) return null;
   const str = String(val).trim();
@@ -108,14 +129,13 @@ function sanitizeRfid(val) {
   return str;
 }
 
-// 5. Inisialisasi Database + Auto Migration Kolom
+// 5. Inisialisasi Database + Migration
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
 
   const db = getDb();
 
-  // Tabel Users
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,7 +146,6 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Tabel Siswa
   await db.execute(`
     CREATE TABLE IF NOT EXISTS siswa (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,17 +156,14 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Auto Migration: Tambahkan kolom secara otomatis jika tabel lama belum memilikinya
   try { await db.execute("ALTER TABLE siswa ADD COLUMN rfid_uid TEXT;"); } catch(e) {}
   try { await db.execute("ALTER TABLE siswa ADD COLUMN nis TEXT;"); } catch(e) {}
   try { await db.execute("ALTER TABLE siswa ADD COLUMN kelas TEXT;"); } catch(e) {}
 
-  // Bersihkan data RFID kosong lama yang tersimpan sebagai string "" menjadi NULL murni
   try {
     await db.execute("UPDATE siswa SET rfid_uid = NULL WHERE TRIM(rfid_uid) = '' OR rfid_uid = 'null';");
   } catch(e) {}
 
-  // Tabel Absensi
   await db.execute(`
     CREATE TABLE IF NOT EXISTS absensi (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,7 +175,6 @@ async function ensureTablesExist() {
     );
   `);
 
-  // Akun Admin Default
   await db.execute({
     sql: "INSERT OR IGNORE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
     args: ['admin', 'admin', 'Administrator', 'admin']
@@ -178,11 +193,7 @@ app.post('/api/login', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-
-    let body = req.body || {};
-    if (typeof body === 'string') {
-      try { body = JSON.parse(body); } catch(e){}
-    }
+    const body = parseRequestBody(req);
 
     const username = String(body.username || '').trim();
     const password = String(body.password || '').trim();
@@ -217,19 +228,15 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// TAMBAH / UPDATE SISWA (DENGAN PENANGANAN ERROR & VALIDASI AMAN)
+// TAMBAH / UPDATE SISWA
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-
-    let body = req.body || {};
-    if (typeof body === 'string') {
-      try { body = JSON.parse(body); } catch(e){}
-    }
+    const body = parseRequestBody(req);
 
     let nis = body.nis || body.NIS || body.siswaNis || '';
-    let nama = body.nama || body.Nama || body.siswaNama || '';
+    let nama = body.nama || body.Nama || body.siswaNama || body.name || '';
     let kelas = body.kelas || body.Kelas || body.siswaKelas || '';
     let rfid_uid = body.rfid_uid || body.rfid || body.RFID || body.siswaRfid || null;
 
@@ -238,7 +245,7 @@ app.post('/api/siswa', async (req, res, next) => {
     kelas = String(kelas).trim();
 
     if (!nama || !kelas) {
-      return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi!" });
+      return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi! Mohon lengkapi kedua kolom tersebut." });
     }
 
     if (!nis) {
@@ -247,7 +254,6 @@ app.post('/api/siswa', async (req, res, next) => {
 
     const cleanRfid = sanitizeRfid(rfid_uid);
 
-    // Cek jika RFID sudah dipakai oleh siswa lain
     if (cleanRfid) {
       const checkRfid = await db.execute({
         sql: "SELECT * FROM siswa WHERE rfid_uid = ? AND nis != ?",
@@ -258,7 +264,6 @@ app.post('/api/siswa', async (req, res, next) => {
       }
     }
 
-    // Cek apakah NIS sudah terdaftar untuk Update / Insert Baru
     const checkNis = await db.execute({
       sql: "SELECT * FROM siswa WHERE nis = ?",
       args: [nis]
@@ -287,11 +292,7 @@ async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
     const db = getDb();
-
-    let body = req.body || {};
-    if (typeof body === 'string') {
-      try { body = JSON.parse(body); } catch(e){}
-    }
+    const body = parseRequestBody(req);
 
     let list = null;
     if (Array.isArray(body)) {
@@ -360,28 +361,6 @@ app.get('/api/daftar-kelas', async (req, res, next) => {
   }
 });
 
-app.get('/api/daftar-siswa-kelas', async (req, res, next) => {
-  try {
-    await ensureTablesExist();
-    const db = getDb();
-    const kelasParam = req.query.kelas;
-
-    let query = "SELECT * FROM siswa";
-    let args = [];
-
-    if (kelasParam) {
-      query += " WHERE kelas = ?";
-      args.push(String(kelasParam));
-    }
-    query += " ORDER BY nama ASC";
-
-    const result = await db.execute({ sql: query, args });
-    return res.json({ success: true, data: result.rows });
-  } catch (error) {
-    next(error);
-  }
-});
-
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -397,10 +376,7 @@ app.post('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    let body = req.body || {};
-    if (typeof body === 'string') {
-      try { body = JSON.parse(body); } catch(e){}
-    }
+    const body = parseRequestBody(req);
 
     const { username, password, nama, role } = body;
 
@@ -422,11 +398,7 @@ app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-
-    let body = req.body || {};
-    if (typeof body === 'string') {
-      try { body = JSON.parse(body); } catch(e){}
-    }
+    const body = parseRequestBody(req);
 
     const sanitizedRfid = sanitizeRfid(body.rfid_uid || body.rfid || body.RFID);
     if (!sanitizedRfid) {
@@ -467,7 +439,6 @@ async function handleGetAbsensi(req, res, next) {
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 
-// Static Routing & Fallback
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.all('/api/*', (req, res) => {
@@ -478,7 +449,6 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Global Error Handler
 app.use((err, req, res, next) => {
   console.error("Vercel Serverless Error Captured:", err.message);
   res.status(500).json({
