@@ -27,13 +27,13 @@ function parseRequestBody(req) {
     try {
       body = JSON.parse(body.toString('utf-8'));
     } catch (e) {
-      body = {};
+      body = body.toString('utf-8');
     }
   } else if (typeof body === 'string') {
     try {
       body = JSON.parse(body);
     } catch (e) {
-      body = {};
+      // Biarkan sebagai string jika bukan JSON
     }
   }
   return body || {};
@@ -134,6 +134,130 @@ function cleanStr(val) {
   const str = String(val).trim();
   if (str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return '';
   return str;
+}
+
+// Helper Deteksi Kata Kunci Header
+function cleanKeyName(str) {
+  return String(str || '').replace(/^\uFEFF/, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
+function isNamaKey(k) {
+  return k.includes('nama') || k.includes('name') || k.includes('siswa') || k.includes('fullname') || k.includes('lengkap') || k.includes('murid');
+}
+
+function isKelasKey(k) {
+  return k.includes('kelas') || k.includes('class') || k.includes('rombel') || k.includes('tingkat') || k.includes('kls') || k.includes('jurusan');
+}
+
+function isNisKey(k) {
+  return k.includes('nis') || k.includes('nisn') || k.includes('username') || k.includes('nomor') || k.includes('noinduk') || k.includes('id');
+}
+
+function isRfidKey(k) {
+  return k.includes('rfid') || k.includes('uid') || k.includes('tag') || k.includes('kartu');
+}
+
+function assignFromCols(cols) {
+  const filtered = cols.map(c => cleanStr(c)).filter(c => c !== '');
+  let nis = '', nama = '', kelas = '', rfid_uid = null;
+
+  if (filtered.length >= 4) {
+    nis = filtered[0];
+    nama = filtered[1];
+    kelas = filtered[2];
+    rfid_uid = filtered[3];
+  } else if (filtered.length === 3) {
+    nis = filtered[0];
+    nama = filtered[1];
+    kelas = filtered[2];
+  } else if (filtered.length === 2) {
+    nama = filtered[0];
+    kelas = filtered[1];
+  }
+
+  return { nis, nama, kelas, rfid_uid: sanitizeRfid(rfid_uid) };
+}
+
+function parseRowItem(item) {
+  let nis = '';
+  let nama = '';
+  let kelas = '';
+  let rfid_uid = null;
+
+  if (!item) return { nis, nama, kelas, rfid_uid };
+
+  // Format 1: String "101;Ahmad;10A;1234"
+  if (typeof item === 'string') {
+    const delim = item.includes(';') ? ';' : (item.includes('\t') ? '\t' : ',');
+    const cols = item.split(delim).map(c => c.replace(/^["']|["']$/g, ''));
+    return assignFromCols(cols);
+  }
+
+  // Format 2: Array ["101", "Ahmad", "10A", "1234"]
+  if (Array.isArray(item)) {
+    return assignFromCols(item);
+  }
+
+  // Format 3: Object / JSON
+  if (typeof item === 'object') {
+    const keys = Object.keys(item);
+    const vals = Object.values(item);
+
+    // Kasus 3a: Header & Data Tergabung dalam Titik-Koma
+    if (keys.length === 1 && (keys[0].includes(';') || keys[0].includes(','))) {
+      const delim = keys[0].includes(';') ? ';' : ',';
+      const hCols = keys[0].split(delim).map(h => cleanKeyName(h));
+      const vCols = String(vals[0] || '').split(delim).map(v => v.replace(/^["']|["']$/g, ''));
+
+      for (let i = 0; i < hCols.length; i++) {
+        const hk = hCols[i];
+        const val = cleanStr(vCols[i]);
+        if (isRfidKey(hk)) rfid_uid = rfid_uid || val;
+        else if (isNamaKey(hk)) nama = nama || val;
+        else if (isKelasKey(hk)) kelas = kelas || val;
+        else if (isNisKey(hk)) nis = nis || val;
+      }
+
+      if (!nama || !kelas) {
+        return assignFromCols(vCols);
+      }
+      return { nis, nama, kelas, rfid_uid: sanitizeRfid(rfid_uid) };
+    }
+
+    // Kasus 3b: Object Key-Value Biasa
+    const cleanObj = {};
+    keys.forEach(k => {
+      cleanObj[cleanKeyName(k)] = cleanStr(item[k]);
+    });
+
+    Object.keys(cleanObj).forEach(k => {
+      const val = cleanObj[k];
+      if (!val) return;
+
+      if (isRfidKey(k)) {
+        rfid_uid = rfid_uid || val;
+      } else if (isNamaKey(k)) {
+        nama = nama || val;
+      } else if (isKelasKey(k)) {
+        kelas = kelas || val;
+      } else if (isNisKey(k)) {
+        nis = nis || val;
+      }
+    });
+
+    // Kasus 3c: Fallback ke urutan posisi jika nama/kelas belum ketemu
+    if (!nama || !kelas) {
+      const nonObjVals = vals.map(v => cleanStr(v)).filter(v => v !== '');
+      if (nonObjVals.length === 1 && (nonObjVals[0].includes(';') || nonObjVals[0].includes(','))) {
+        const delim = nonObjVals[0].includes(';') ? ';' : ',';
+        const cols = nonObjVals[0].split(delim).map(c => c.replace(/^["']|["']$/g, ''));
+        return assignFromCols(cols);
+      }
+      return assignFromCols(nonObjVals);
+    }
+  }
+
+  return { nis, nama, kelas, rfid_uid: sanitizeRfid(rfid_uid) };
 }
 
 // 5. Inisialisasi Database
@@ -243,20 +367,40 @@ app.get('/api/siswa', async (req, res, next) => {
   }
 });
 
-// SIMPAN / UPDATE SISWA (SINGLE)
+// SIMPAN / UPDATE SISWA (SINGLE MANUAL INPUT - UNIVERSAL)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
     const body = parseRequestBody(req);
 
-    let nis = cleanStr(body.nis || body.NIS || body.siswaNis);
-    let nama = cleanStr(body.nama || body.Nama || body.siswaNama || body.name);
-    let kelas = cleanStr(body.kelas || body.Kelas || body.siswaKelas);
-    let rfid_uid = body.rfid_uid || body.rfid || body.RFID || body.siswaRfid || null;
+    // 1. Coba ekstraksi secara otomatis menggunakan Parser Universal
+    let parsed = parseRowItem(body);
+    let nis = parsed.nis;
+    let nama = parsed.nama;
+    let kelas = parsed.kelas;
+    let rfid_uid = parsed.rfid_uid;
 
+    // 2. Jika belum ketemu, lakukan pencarian mendalam pada seluruh properti objek
     if (!nama || !kelas) {
-      return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi!" });
+      const targetObj = (typeof body === 'object' && body !== null) ? (body.data || body.siswa || body) : {};
+      Object.keys(targetObj).forEach(k => {
+        const cleanK = cleanKeyName(k);
+        const val = cleanStr(targetObj[k]);
+        if (isNamaKey(cleanK) && !nama) nama = val;
+        if (isKelasKey(cleanK) && !kelas) kelas = val;
+        if (isNisKey(cleanK) && !nis) nis = val;
+        if (isRfidKey(cleanK) && !rfid_uid) rfid_uid = val;
+      });
+    }
+
+    // 3. Pengecekan Akhir
+    if (!nama || !kelas) {
+      return res.status(400).json({
+        success: false,
+        message: "Nama dan Kelas wajib diisi! Pastikan teks pada form input terisi.",
+        debug_diterima: body
+      });
     }
 
     if (!nis) {
@@ -317,7 +461,7 @@ app.delete('/api/siswa/:id', async (req, res, next) => {
   }
 });
 
-// IMPORT BULK SISWA (ULTRA FLEKSIBEL: MENDUKUNG NAMA KOLOM & FALLBACK POSITION/URUTAN)
+// IMPORT BULK SISWA
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
@@ -325,10 +469,29 @@ async function handleBulkImport(req, res, next) {
     const body = parseRequestBody(req);
 
     let list = null;
+
     if (Array.isArray(body)) {
       list = body;
+    } else if (typeof body === 'string') {
+      list = body.split(/\r?\n/).filter(line => line.trim() !== '');
     } else if (typeof body === 'object' && body !== null) {
-      list = body.dataSiswa || body.siswa || body.data || body.items || body.rows || body.list || null;
+      for (const k of Object.keys(body)) {
+        if (Array.isArray(body[k])) {
+          list = body[k];
+          break;
+        }
+      }
+      if (!list) {
+        for (const k of Object.keys(body)) {
+          if (typeof body[k] === 'string' && (body[k].includes('\n') || body[k].includes(';') || body[k].includes(','))) {
+            list = body[k].split(/\r?\n/).filter(line => line.trim() !== '');
+            break;
+          }
+        }
+      }
+      if (!list && Object.keys(body).length > 0) {
+        list = [body];
+      }
     }
 
     if (!list || !Array.isArray(list) || list.length === 0) {
@@ -336,106 +499,20 @@ async function handleBulkImport(req, res, next) {
     }
 
     let insertedCount = 0;
-    const errors = [];
 
     for (let i = 0; i < list.length; i++) {
       const item = list[i];
-      if (!item) continue;
+      let { nis, nama, kelas, rfid_uid } = parseRowItem(item);
 
-      let nis = '', nama = '', kelas = '', rfid_uid = null;
-
-      // KASUS 1: Data berbentuk Array [nis, nama, kelas, rfid]
-      if (Array.isArray(item)) {
-        if (item.length >= 2) {
-          if (item.length === 2) {
-            nama = cleanStr(item[0]);
-            kelas = cleanStr(item[1]);
-          } else {
-            nis = cleanStr(item[0]);
-            nama = cleanStr(item[1]);
-            kelas = cleanStr(item[2]);
-            rfid_uid = cleanStr(item[3]);
-          }
-        }
-      } 
-      // KASUS 2: Data berbentuk String "nis,nama,kelas,rfid" atau "nis;nama;kelas;rfid"
-      else if (typeof item === 'string') {
-        const delim = item.includes(';') ? ';' : ',';
-        const cols = item.split(delim).map(c => cleanStr(c.replace(/["']/g, '')));
-        if (cols.length >= 2) {
-          if (cols.length === 2) {
-            nama = cols[0];
-            kelas = cols[1];
-          } else {
-            nis = cols[0];
-            nama = cols[1];
-            kelas = cols[2];
-            rfid_uid = cols[3];
-          }
-        }
-      } 
-      // KASUS 3: Data berbentuk Object
-      else if (typeof item === 'object') {
-        const keys = Object.keys(item);
-        const isNumericKeys = keys.length > 0 && keys.every(k => !isNaN(k));
-
-        if (isNumericKeys) {
-          const vals = Object.values(item).map(v => cleanStr(v));
-          if (vals.length >= 3) {
-            nis = vals[0];
-            nama = vals[1];
-            kelas = vals[2];
-            rfid_uid = vals[3] || null;
-          } else if (vals.length === 2) {
-            nama = vals[0];
-            kelas = vals[1];
-          }
-        } else {
-          // Normalisasi Nama Header
-          const cleanRow = {};
-          keys.forEach(k => {
-            if (k.includes(';') || k.includes(',')) {
-              const delim = k.includes(';') ? ';' : ',';
-              const kArr = k.split(delim);
-              const vArr = String(item[k] || '').split(delim);
-              kArr.forEach((subK, idx) => {
-                const cK = subK.replace(/[^\w]/g, '').toLowerCase();
-                cleanRow[cK] = cleanStr(vArr[idx]);
-              });
-            } else {
-              const cK = k.replace(/[^\w]/g, '').toLowerCase();
-              cleanRow[cK] = cleanStr(item[k]);
-            }
-          });
-
-          // Pengecekan Kunci Berdasarkan Nama Header
-          nis = cleanRow.nis || cleanRow.nisn || cleanRow.username || cleanRow.nomorinduk || cleanRow.id || '';
-          nama = cleanRow.nama || cleanRow.namasiswa || cleanRow.namalengkap || cleanRow.name || cleanRow.fullname || cleanRow.siswa || '';
-          kelas = cleanRow.kelas || cleanRow.class || cleanRow.rombel || cleanRow.tingkat || '';
-          rfid_uid = cleanRow.rfiduid || cleanRow.rfid || cleanRow.uid || cleanRow.kartu || cleanRow.tag || null;
-
-          // FALLBACK UTAMA: Jika nama/kelas tetap tidak terdeteksi, ambil nilai berdasarkan Posisi Urutan Kolom
-          if (!nama || !kelas) {
-            const vals = Object.values(item).map(v => cleanStr(v)).filter(v => v !== '');
-            if (vals.length >= 3) {
-              if (!nis) nis = vals[0];
-              if (!nama) nama = vals[1];
-              if (!kelas) kelas = vals[2];
-              if (!rfid_uid) rfid_uid = vals[3] || null;
-            } else if (vals.length === 2) {
-              if (!nama) nama = vals[0];
-              if (!kelas) kelas = vals[1];
-            }
-          }
-        }
-      }
-
-      // Abaikan Baris Header (Jika berisi kata "nama", "kelas", "nis")
-      if (String(nama).toLowerCase() === 'nama' || String(kelas).toLowerCase() === 'kelas' || String(nis).toLowerCase() === 'nis') {
+      const lowerNama = String(nama).trim().toLowerCase();
+      const lowerKelas = String(kelas).trim().toLowerCase();
+      if (
+        lowerNama === 'nama' || lowerNama === 'nama_siswa' || lowerNama === 'namasiswa' || lowerNama === 'name' || lowerNama === 'fullname' ||
+        lowerKelas === 'kelas' || lowerKelas === 'class' || lowerKelas === 'rombel'
+      ) {
         continue;
       }
 
-      // Abaikan baris kosong
       if (!nis && !nama && !kelas && !rfid_uid) continue;
 
       if (nama && kelas) {
@@ -462,16 +539,14 @@ async function handleBulkImport(req, res, next) {
           });
         }
         insertedCount++;
-      } else {
-        errors.push(`Baris ${i + 1}: Nama/Kelas tidak terbaca`);
       }
     }
 
     if (insertedCount === 0) {
       return res.status(400).json({
         success: false,
-        message: "Gagal impor: Nama dan Kelas wajib diisi! Pastikan file berisi data siswa.",
-        detail: errors
+        message: "Gagal impor: Data siswa tidak dapat terbaca. Pastikan file berisi data Nama dan Kelas.",
+        sample: list.slice(0, 2)
       });
     }
 
