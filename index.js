@@ -18,11 +18,11 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Helper Parsing Body Teraman (Handling Buffer/String/Object di Vercel)
+// Helper Parsing Body Teraman untuk Vercel
 function parseRequestBody(req) {
   let body = req.body;
   if (!body) return {};
-  
+
   if (Buffer.isBuffer(body)) {
     try {
       body = JSON.parse(body.toString('utf-8'));
@@ -129,13 +129,14 @@ function sanitizeRfid(val) {
   return str;
 }
 
-// 5. Inisialisasi Database + Migration
+// 5. Inisialisasi Database
 let isInitialized = false;
 async function ensureTablesExist() {
   if (isInitialized) return;
 
   const db = getDb();
 
+  // Tabel Users
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,6 +147,7 @@ async function ensureTablesExist() {
     );
   `);
 
+  // Tabel Siswa
   await db.execute(`
     CREATE TABLE IF NOT EXISTS siswa (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,14 +158,17 @@ async function ensureTablesExist() {
     );
   `);
 
+  // Auto Migration Kolom
   try { await db.execute("ALTER TABLE siswa ADD COLUMN rfid_uid TEXT;"); } catch(e) {}
   try { await db.execute("ALTER TABLE siswa ADD COLUMN nis TEXT;"); } catch(e) {}
   try { await db.execute("ALTER TABLE siswa ADD COLUMN kelas TEXT;"); } catch(e) {}
 
+  // Pembersihan RFID kosong
   try {
     await db.execute("UPDATE siswa SET rfid_uid = NULL WHERE TRIM(rfid_uid) = '' OR rfid_uid = 'null';");
   } catch(e) {}
 
+  // Tabel Absensi
   await db.execute(`
     CREATE TABLE IF NOT EXISTS absensi (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,6 +180,7 @@ async function ensureTablesExist() {
     );
   `);
 
+  // Akun Admin Default
   await db.execute({
     sql: "INSERT OR IGNORE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
     args: ['admin', 'admin', 'Administrator', 'admin']
@@ -189,6 +195,7 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: "OK", message: "Server aktif!" });
 });
 
+// LOGIN
 app.post('/api/login', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -217,35 +224,32 @@ app.post('/api/login', async (req, res, next) => {
   }
 });
 
+// GET LIST SISWA
 app.get('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const result = await db.execute("SELECT * FROM siswa ORDER BY nama ASC");
+    const result = await db.execute("SELECT * FROM siswa ORDER BY id DESC");
     return res.json({ success: true, data: result.rows });
   } catch (error) {
     next(error);
   }
 });
 
-// TAMBAH / UPDATE SISWA
+// SIMPAN / UPDATE SISWA (PERBAIKAN BESAR DI SINI)
 app.post('/api/siswa', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
     const body = parseRequestBody(req);
 
-    let nis = body.nis || body.NIS || body.siswaNis || '';
-    let nama = body.nama || body.Nama || body.siswaNama || body.name || '';
-    let kelas = body.kelas || body.Kelas || body.siswaKelas || '';
+    let nis = String(body.nis || body.NIS || body.siswaNis || '').trim();
+    let nama = String(body.nama || body.Nama || body.siswaNama || body.name || '').trim();
+    let kelas = String(body.kelas || body.Kelas || body.siswaKelas || '').trim();
     let rfid_uid = body.rfid_uid || body.rfid || body.RFID || body.siswaRfid || null;
 
-    nis = String(nis).trim();
-    nama = String(nama).trim();
-    kelas = String(kelas).trim();
-
     if (!nama || !kelas) {
-      return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi! Mohon lengkapi kedua kolom tersebut." });
+      return res.status(400).json({ success: false, message: "Nama dan Kelas wajib diisi!" });
     }
 
     if (!nis) {
@@ -254,27 +258,31 @@ app.post('/api/siswa', async (req, res, next) => {
 
     const cleanRfid = sanitizeRfid(rfid_uid);
 
+    // Cek duplikasi RFID
     if (cleanRfid) {
       const checkRfid = await db.execute({
         sql: "SELECT * FROM siswa WHERE rfid_uid = ? AND nis != ?",
         args: [cleanRfid, nis]
       });
       if (checkRfid.rows.length > 0) {
-        return res.status(400).json({ success: false, message: `RFID '${cleanRfid}' sudah dipakai oleh: ${checkRfid.rows[0].nama}` });
+        return res.status(400).json({ success: false, message: `RFID '${cleanRfid}' sudah dipakai oleh siswa: ${checkRfid.rows[0].nama}` });
       }
     }
 
+    // Cek apakah NIS sudah ada
     const checkNis = await db.execute({
       sql: "SELECT * FROM siswa WHERE nis = ?",
       args: [nis]
     });
 
     if (checkNis.rows.length > 0) {
+      // UPDATE
       await db.execute({
         sql: "UPDATE siswa SET nama = ?, kelas = ?, rfid_uid = ? WHERE nis = ?",
         args: [nama, kelas, cleanRfid, nis]
       });
     } else {
+      // INSERT (URUTAN SUDAH DIPERBAIKI: nis, nama, kelas, cleanRfid)
       await db.execute({
         sql: "INSERT INTO siswa (nis, nama, kelas, rfid_uid) VALUES (?, ?, ?, ?)",
         args: [nis, nama, kelas, cleanRfid]
@@ -283,11 +291,30 @@ app.post('/api/siswa', async (req, res, next) => {
 
     return res.json({ success: true, message: "Data siswa berhasil disimpan!" });
   } catch (error) {
+    console.error("Error SIMPAN SISWA:", error.message);
     return res.status(500).json({ success: false, message: `Gagal menyimpan siswa: ${error.message}` });
   }
 });
 
-// IMPORT BULK SISWA (EXCEL)
+// HAPUS SISWA
+app.delete('/api/siswa/:id', async (req, res, next) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const { id } = req.params;
+
+    await db.execute({
+      sql: "DELETE FROM siswa WHERE id = ? OR nis = ?",
+      args: [id, id]
+    });
+
+    return res.json({ success: true, message: "Siswa berhasil dihapus!" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// IMPORT EXCEL BULK SISWA
 async function handleBulkImport(req, res, next) {
   try {
     await ensureTablesExist();
@@ -349,36 +376,29 @@ async function handleBulkImport(req, res, next) {
 app.post('/api/siswa/import', handleBulkImport);
 app.post('/api/siswa/bulk', handleBulkImport);
 
-app.get('/api/daftar-kelas', async (req, res, next) => {
-  try {
-    await ensureTablesExist();
-    const db = getDb();
-    const result = await db.execute("SELECT DISTINCT kelas FROM siswa WHERE kelas IS NOT NULL AND kelas != '' ORDER BY kelas ASC");
-    const listKelas = result.rows.map(row => row.kelas);
-    return res.json({ success: true, data: listKelas, kelas: listKelas });
-  } catch (error) {
-    next(error);
-  }
-});
-
+// GET LIST USERS
 app.get('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
-    const result = await db.execute("SELECT id, username, nama, role FROM users");
+    const result = await db.execute("SELECT id, username, nama, role FROM users ORDER BY id DESC");
     return res.json({ success: true, data: result.rows });
   } catch (error) {
     next(error);
   }
 });
 
+// TAMBAH USER
 app.post('/api/users', async (req, res, next) => {
   try {
     await ensureTablesExist();
     const db = getDb();
     const body = parseRequestBody(req);
 
-    const { username, password, nama, role } = body;
+    const username = String(body.username || '').trim();
+    const password = String(body.password || '').trim();
+    const nama = String(body.nama || username).trim();
+    const role = String(body.role || 'admin').trim();
 
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Username dan Password wajib diisi!" });
@@ -386,14 +406,33 @@ app.post('/api/users', async (req, res, next) => {
 
     await db.execute({
       sql: "INSERT OR REPLACE INTO users (username, password, nama, role) VALUES (?, ?, ?, ?)",
-      args: [String(username).trim(), String(password).trim(), String(nama || username).trim(), String(role || 'admin').trim()]
+      args: [username, password, nama, role]
     });
-    return res.json({ success: true, message: "User berhasil ditambahkan!" });
+    return res.json({ success: true, message: "User berhasil disimpan!" });
   } catch (error) {
     next(error);
   }
 });
 
+// HAPUS USER
+app.delete('/api/users/:id', async (req, res, next) => {
+  try {
+    await ensureTablesExist();
+    const db = getDb();
+    const { id } = req.params;
+
+    await db.execute({
+      sql: "DELETE FROM users WHERE id = ?",
+      args: [id]
+    });
+
+    return res.json({ success: true, message: "User berhasil dihapus!" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// TAP RFID SIMULASI
 app.post('/api/tap', async (req, res, next) => {
   try {
     await ensureTablesExist();
@@ -426,6 +465,7 @@ app.post('/api/tap', async (req, res, next) => {
   }
 });
 
+// GET REKAP ABSENSI
 async function handleGetAbsensi(req, res, next) {
   try {
     await ensureTablesExist();
@@ -439,6 +479,7 @@ async function handleGetAbsensi(req, res, next) {
 app.get('/api/absensi', handleGetAbsensi);
 app.get('/api/log-absensi', handleGetAbsensi);
 
+// Static Routing
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.all('/api/*', (req, res) => {
@@ -449,6 +490,7 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Global Error Handler
 app.use((err, req, res, next) => {
   console.error("Vercel Serverless Error Captured:", err.message);
   res.status(500).json({
