@@ -3,687 +3,266 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sistem Absensi RFID Siswa</title>
-  <!-- Bootstrap 5 CSS -->
+  <title>Sistem Presensi RFID</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-  
   <style>
-    body {
-      background-color: #f4f6f9;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-
-    .navbar-brand {
-      font-weight: 700;
-      letter-spacing: 0.5px;
-    }
-
-    .card {
-      border: none;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-      background-color: #ffffff;
-    }
-
-    table, table th, table td {
-      color: #000000 !important;
-      vertical-align: middle;
-    }
-
-    table th {
-      background-color: #e9ecef !important;
-      font-weight: 700;
-      text-transform: uppercase;
-      font-size: 0.85rem;
-    }
-
-    table td {
-      background-color: #ffffff !important;
-      font-size: 0.95rem;
-      font-weight: 500;
-    }
-
-    input.form-control, select.form-select {
-      color: #000000 !important;
-      background-color: #ffffff !important;
-      border: 1px solid #ced4da;
-    }
-
-    .badge-rfid {
-      font-family: monospace;
-      font-size: 0.9rem;
-      background-color: #f8f9fa;
-      color: #000000 !important;
-      border: 1px solid #dcdcdc;
-      padding: 4px 8px;
-      border-radius: 4px;
-    }
-
-    .stat-card {
-      padding: 20px;
-      border-radius: 12px;
-      color: #ffffff;
-    }
-
-    /* LOGIN SCREEN STYLING */
-    #loginScreen {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
-    }
-
-    .login-card {
-      width: 100%;
-      max-width: 400px;
-      padding: 30px;
-      border-radius: 16px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-    }
+    body { background-color: #f8f9fa; }
+    .badge-rfid { font-family: monospace; background: #eee; padding: 4px 8px; border-radius: 4px; color: #333; }
+    .stat-card { padding: 20px; border-radius: 12px; color: white; }
   </style>
 </head>
 <body>
 
-  <!-- 1. HALAMAN LOGIN -->
-  <div id="loginScreen">
-    <div class="card login-card text-center">
-      <div class="mb-3 text-primary">
-        <i class="fa-solid fa-id-card fa-4x"></i>
-      </div>
-      <h4 class="fw-bold text-dark mb-1">Presensi RFID Siswa</h4>
-      <p class="text-muted small mb-4">Masuk untuk mengelola data siswa</p>
-
-      <div id="loginAlert" class="d-none"></div>
-
-      <form id="formLogin" onsubmit="prosesLogin(event)">
-        <div class="mb-3 text-start">
-          <label class="form-label text-dark fw-bold">Username</label>
-          <input type="text" id="loginUsername" class="form-control" value="admin" required placeholder="admin">
-        </div>
-        <div class="mb-3 text-start">
-          <label class="form-label text-dark fw-bold">Password</label>
-          <input type="password" id="loginPassword" class="form-control" value="admin123" required placeholder="admin123">
-        </div>
-        <button type="submit" id="btnLogin" class="btn btn-primary w-100 py-2 fw-bold">
-          <i class="fa-solid fa-right-to-bracket me-1"></i> MASUK SYSTEM
-        </button>
+  <!-- LOGIN -->
+  <div id="loginScreen" class="min-vh-100 d-flex align-items-center justify-content-center bg-primary">
+    <div class="card p-4 shadow-lg text-center" style="max-width: 400px; width: 100%;">
+      <i class="fa-solid fa-id-badge fa-4x text-primary mb-3"></i>
+      <h4 class="fw-bold">Login Admin</h4>
+      <form onsubmit="login(event)" class="mt-4">
+        <input type="text" id="username" class="form-control mb-3" placeholder="Username (admin)" required>
+        <input type="password" id="password" class="form-control mb-3" placeholder="Password (admin123)" required>
+        <button type="submit" class="btn btn-primary w-100 fw-bold">Masuk</button>
       </form>
-      <div class="mt-3 text-muted small">
-        Kredensial Default: <b>admin</b> / <b>admin123</b>
-      </div>
     </div>
   </div>
 
-  <!-- 2. HALAMAN DASHBOARD (HIDDEN DEFAULT) -->
+  <!-- DASHBOARD -->
   <div id="dashboardScreen" class="d-none">
-    
-    <!-- NAVBAR -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+    <nav class="navbar navbar-dark bg-primary shadow-sm mb-4">
       <div class="container">
-        <a class="navbar-brand" href="#"><i class="fa-solid fa-id-card me-2"></i>PRESENSI RFID SISWA</a>
-        <div class="d-flex gap-2 align-items-center">
-          <button class="btn btn-warning btn-sm fw-bold" onclick="reparasiDatabase()">
-            <i class="fa-solid fa-screwdriver-wrench me-1"></i> Reset / Perbaiki Tabel
-          </button>
-          <button class="btn btn-outline-light btn-sm" onclick="loadSemuaData()">
-            <i class="fa-solid fa-rotate me-1"></i> Refresh
-          </button>
-          <button class="btn btn-danger btn-sm fw-bold" onclick="logout()">
-            <i class="fa-solid fa-power-off"></i> Logout
-          </button>
-        </div>
+        <a class="navbar-brand fw-bold" href="#"><i class="fa-solid fa-id-card me-2"></i>Presensi Siswa</a>
+        <button class="btn btn-danger btn-sm fw-bold" onclick="logout()"><i class="fa-solid fa-power-off"></i> Keluar</button>
       </div>
     </nav>
 
-    <div class="container my-4">
-      
-      <!-- ALERT NOTIFIKASI ERROR -->
-      <div id="errorNoticeBox" class="d-none"></div>
-
-      <!-- DASHBOARD STATS -->
+    <div class="container">
       <div class="row g-3 mb-4">
         <div class="col-md-6">
-          <div class="stat-card bg-primary d-flex align-items-center justify-content-between">
-            <div>
-              <h6 class="text-white-50 mb-1">Total Siswa Terdaftar</h6>
-              <h2 class="mb-0 fw-bold" id="totalSiswaCount">0</h2>
-            </div>
+          <div class="stat-card bg-primary d-flex justify-content-between align-items-center">
+            <div><h6 class="mb-1">Total Siswa</h6><h2 id="totalSiswa" class="fw-bold mb-0">0</h2></div>
             <i class="fa-solid fa-users fa-3x opacity-50"></i>
           </div>
         </div>
         <div class="col-md-6">
-          <div class="stat-card bg-success d-flex align-items-center justify-content-between">
-            <div>
-              <h6 class="text-white-50 mb-1">Total Presensi Today</h6>
-              <h2 class="mb-0 fw-bold" id="totalAbsenCount">0</h2>
-            </div>
-            <i class="fa-solid fa-clipboard-user fa-3x opacity-50"></i>
+          <div class="stat-card bg-success d-flex justify-content-between align-items-center">
+            <div><h6 class="mb-1">Hadir Terakhir</h6><h2 id="totalAbsen" class="fw-bold mb-0">0</h2></div>
+            <i class="fa-solid fa-check-circle fa-3x opacity-50"></i>
           </div>
         </div>
       </div>
 
-      <!-- MAIN CONTENT -->
       <div class="row g-4">
-        
-        <!-- TABEL DATA SISWA -->
         <div class="col-lg-8">
-          <div class="card p-3">
-            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-              <h5 class="fw-bold m-0 text-dark"><i class="fa-solid fa-user-graduate me-2 text-primary"></i>Data Siswa</h5>
-              <div class="d-flex gap-2">
-                <select id="filterKelasSelect" class="form-select form-select-sm" style="width: 140px;" onchange="renderTabelSiswa()">
-                  <option value="">Semua Kelas</option>
+          <div class="card shadow-sm p-3">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold m-0"><i class="fa-solid fa-database text-primary me-2"></i>Data Siswa</h5>
+              <button class="btn btn-primary btn-sm fw-bold" onclick="bukaModal()"><i class="fa-solid fa-plus me-1"></i>Tambah</button>
+            </div>
+            
+            <!-- ALAT PENCARIAN & FILTER -->
+            <div class="row g-2 mb-3">
+              <div class="col-md-6">
+                <input type="text" id="cariData" class="form-control" placeholder="Cari Nama, NIS, atau RFID..." oninput="renderTabel()">
+              </div>
+              <div class="col-md-6">
+                <select id="filterKelas" class="form-select" onchange="renderTabel()">
+                  <option value="">-- Semua Kelas --</option>
                 </select>
-                <button class="btn btn-primary btn-sm fw-bold" onclick="bukaModalTambah()">
-                  <i class="fa-solid fa-plus me-1"></i> Tambah Siswa
-                </button>
               </div>
             </div>
 
             <div class="table-responsive">
-              <table class="table table-hover table-bordered m-0">
-                <thead>
-                  <tr>
-                    <th class="text-center" style="width: 50px;">No</th>
-                    <th>NIS</th>
-                    <th>Nama Siswa</th>
-                    <th>Kelas</th>
-                    <th>UID RFID</th>
-                    <th class="text-center" style="width: 110px;">Aksi</th>
-                  </tr>
+              <table class="table table-bordered table-hover align-middle">
+                <thead class="table-light">
+                  <tr><th>No</th><th>NIS</th><th>Nama</th><th>Kelas</th><th>RFID</th><th class="text-center">Aksi</th></tr>
                 </thead>
-                <tbody id="tabelSiswaBody">
-                  <tr>
-                    <td colspan="6" class="text-center py-4 text-muted">Memuat data siswa...</td>
-                  </tr>
-                </tbody>
+                <tbody id="tabelSiswa"></tbody>
               </table>
             </div>
           </div>
         </div>
 
-        <!-- SIMULATOR TAP RFID & PRESENSI -->
         <div class="col-lg-4">
-          <div class="card p-3 mb-4">
-            <h5 class="fw-bold mb-3 text-dark"><i class="fa-solid fa-wifi me-2 text-success"></i>Tap RFID Card</h5>
-            <form id="formTapRfid" onsubmit="prosesTapRfid(event)">
-              <div class="mb-3">
-                <label class="form-label text-dark fw-semibold">Scan / Masukkan UID RFID</label>
-                <input type="text" id="tapRfidInput" class="form-control form-control-lg text-center fw-bold" placeholder="Contoh: RFID1001" required autocomplete="off">
-              </div>
-              <button type="submit" class="btn btn-success w-100 py-2 fw-bold">
-                <i class="fa-solid fa-hand-pointer me-1"></i> TAP KARTU PRESENSI
-              </button>
+          <div class="card shadow-sm p-3 mb-4 border-success">
+            <h5 class="fw-bold text-success mb-3"><i class="fa-solid fa-wifi me-2"></i>Tap Kartu</h5>
+            <form onsubmit="tapKartu(event)">
+              <input type="text" id="tapInput" class="form-control text-center fw-bold fs-5 mb-2" placeholder="Scan Kartu..." required autocomplete="off">
+              <button type="submit" class="btn btn-success w-100 fw-bold">TAP PRESENSI</button>
             </form>
-            <div id="tapResultAlert" class="mt-3"></div>
           </div>
 
-          <!-- REKAP PRESENSI TERAKHIR -->
-          <div class="card p-3">
-            <h5 class="fw-bold mb-3 text-dark"><i class="fa-solid fa-clock-rotate-left me-2 text-info"></i>Presensi Terakhir</h5>
+          <div class="card shadow-sm p-3">
+            <h5 class="fw-bold mb-3"><i class="fa-solid fa-history me-2"></i>Riwayat</h5>
             <div class="table-responsive">
               <table class="table table-sm">
-                <thead>
-                  <tr>
-                    <th>Nama</th>
-                    <th>Kelas</th>
-                    <th>Waktu</th>
-                  </tr>
-                </thead>
-                <tbody id="tabelAbsensiBody">
-                  <tr>
-                    <td colspan="3" class="text-center text-muted">Belum ada presensi</td>
-                  </tr>
-                </tbody>
+                <tbody id="tabelRiwayat"></tbody>
               </table>
             </div>
           </div>
-
         </div>
       </div>
     </div>
   </div>
 
-  <!-- MODAL TAMBAH / EDIT SISWA -->
-  <div class="modal fade" id="siswaModal" tabindex="-1" aria-hidden="true">
+  <!-- MODAL -->
+  <div class="modal fade" id="siswaModal" tabindex="-1">
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header bg-primary text-white">
-          <h5 class="modal-title fw-bold" id="modalTitle">Tambah Siswa Baru</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          <h5 class="modal-title fw-bold" id="modalTitle">Tambah Siswa</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
         </div>
-        <form id="formSiswa" onsubmit="simpanSiswa(event)">
+        <form onsubmit="simpanSiswa(event)">
           <div class="modal-body">
-            <input type="hidden" id="siswaId">
-            
-            <div class="mb-3">
-              <label class="form-label fw-bold text-dark">NIS (Nomor Induk Siswa)</label>
-              <input type="text" id="siswaNis" class="form-control" placeholder="1001" required>
-            </div>
-
-            <div class="mb-3">
-              <label class="form-label fw-bold text-dark">Nama Lengkap Siswa</label>
-              <input type="text" id="siswaNama" class="form-control" placeholder="Ahmad Rizky" required>
-            </div>
-
-            <div class="mb-3">
-              <label class="form-label fw-bold text-dark">Pilihan Kelas</label>
-              <select id="siswaKelasSelect" class="form-select" onchange="toggleCustomKelasInput(this.value)" required>
-                <option value="">-- Pilih Kelas --</option>
-              </select>
-              <input type="text" id="siswaKelasCustom" class="form-control mt-2 d-none" placeholder="Masukkan Nama Kelas Lainnya...">
-            </div>
-
-            <div class="mb-3">
-              <label class="form-label fw-bold text-dark">UID RFID Kartu</label>
-              <input type="text" id="siswaRfid" class="form-control" placeholder="RFID1001" required>
-            </div>
+            <input type="hidden" id="sId">
+            <div class="mb-2"><label class="fw-bold">NIS</label><input type="text" id="sNis" class="form-control" required></div>
+            <div class="mb-2"><label class="fw-bold">Nama Lengkap</label><input type="text" id="sNama" class="form-control" required></div>
+            <div class="mb-2"><label class="fw-bold">Kelas</label><input type="text" id="sKelas" class="form-control" placeholder="Contoh: 10 IPA 1" required></div>
+            <div class="mb-2"><label class="fw-bold">UID RFID</label><input type="text" id="sRfid" class="form-control" required></div>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-            <button type="submit" class="btn btn-primary fw-bold" id="btnSimpan"><i class="fa-solid fa-save me-1"></i> Simpan Data</button>
+            <button type="submit" class="btn btn-primary fw-bold w-100">Simpan Data</button>
           </div>
         </form>
       </div>
     </div>
   </div>
 
-  <!-- Bootstrap 5 JS Bundle -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-
   <script>
-    let modalInstance = null;
-    let cacheSiswaList = [];
-    let cacheKelasList = [];
+    let dbSiswa = [], modalApp;
 
     document.addEventListener("DOMContentLoaded", () => {
-      modalInstance = new bootstrap.Modal(document.getElementById('siswaModal'));
-      cekSesiLogin();
+      modalApp = new bootstrap.Modal(document.getElementById('siswaModal'));
+      if(localStorage.getItem('isLogin') === '1') showDashboard();
     });
 
-    // SISTEM LOGIN & SESI
-    function cekSesiLogin() {
-      const isLogin = localStorage.getItem('userLoggedIn');
-      if (isLogin === 'true') {
-        tampilkanDashboard();
-      } else {
-        tampilkanLogin();
-      }
-    }
-
-    async function prosesLogin(e) {
+    async function login(e) {
       e.preventDefault();
-      const username = document.getElementById('loginUsername').value.trim();
-      const password = document.getElementById('loginPassword').value.trim();
-      const alertBox = document.getElementById('loginAlert');
-      const btn = document.getElementById('btnLogin');
-
-      try {
-        btn.disabled = true;
-        btn.innerText = "Memeriksa...";
-
-        const res = await fetch('/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password })
-        });
-
-        const json = await res.json();
-
-        if (res.ok && json.success) {
-          localStorage.setItem('userLoggedIn', 'true');
-          tampilkanDashboard();
-        } else {
-          alertBox.className = "alert alert-danger fw-bold mb-3";
-          alertBox.innerText = json.message || "Login gagal!";
-        }
-      } catch (err) {
-        alertBox.className = "alert alert-danger fw-bold mb-3";
-        alertBox.innerText = "Error server: " + err.message;
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = `<i class="fa-solid fa-right-to-bracket me-1"></i> MASUK SYSTEM`;
-      }
+      const res = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.value, password: password.value })
+      });
+      const data = await res.json();
+      if(data.success) { localStorage.setItem('isLogin', '1'); showDashboard(); }
+      else alert(data.message);
     }
 
-    function logout() {
-      localStorage.removeItem('userLoggedIn');
-      tampilkanLogin();
-    }
+    function logout() { localStorage.clear(); location.reload(); }
 
-    function tampilkanLogin() {
-      document.getElementById('loginScreen').classList.remove('d-none');
-      document.getElementById('dashboardScreen').classList.add('d-none');
-    }
-
-    function tampilkanDashboard() {
+    function showDashboard() {
       document.getElementById('loginScreen').classList.add('d-none');
       document.getElementById('dashboardScreen').classList.remove('d-none');
-      loadSemuaData();
+      loadSemua();
     }
 
-    async function loadSemuaData() {
-      await Promise.all([loadDaftarKelas(), loadSiswa(), loadAbsensi()]);
-    }
-
-    // REPARASI DATABASE SECARA BERSIH
-    async function reparasiDatabase() {
-      if (!confirm("Tindakan ini akan mereset dan memulihkan data siswa contoh ke database Turso. Lanjutkan?")) return;
-
+    async function loadSemua() {
       try {
-        const res = await fetch('/api/repair-db', { method: 'POST' });
-        const json = await res.json();
-        alert(json.message);
-        loadSemuaData();
-      } catch (err) {
-        alert("Gagal reparasi: " + err.message);
-      }
+        const [resSiswa, resAbsen, resKelas] = await Promise.all([ fetch('/api/siswa'), fetch('/api/absensi'), fetch('/api/kelas') ]);
+        const dataSiswa = await resSiswa.json();
+        const dataAbsen = await resAbsen.json();
+        const dataKelas = await resKelas.json();
+
+        if (dataSiswa.success) dbSiswa = dataSiswa.data;
+        document.getElementById('totalSiswa').innerText = dbSiswa.length;
+        document.getElementById('totalAbsen').innerText = (dataAbsen.data || []).length;
+
+        // Set Dropdown Kelas
+        const filterEl = document.getElementById('filterKelas');
+        filterEl.innerHTML = '<option value="">-- Semua Kelas --</option>' + (dataKelas.data || []).map(k => `<option value="${k}">${k}</option>`).join('');
+
+        renderTabel();
+        renderRiwayat(dataAbsen.data || []);
+      } catch (err) { console.error(err); }
     }
 
-    // FETCH PILIHAN KELAS
-    async function loadDaftarKelas() {
-      try {
-        const res = await fetch('/api/kelas');
-        const json = await res.json();
-        cacheKelasList = json.kelas || [
-          "10 IPA 1", "10 IPA 2", "10 IPS 1", "10 IPS 2",
-          "11 IPA 1", "11 IPA 2", "11 IPS 1", "11 IPS 2",
-          "12 IPA 1", "12 IPA 2", "12 IPS 1", "12 IPS 2"
-        ];
-        populateKelasDropdowns();
-      } catch (err) {
-        console.error("Gagal load kelas:", err);
-      }
-    }
+    // FUNGSI PENCARIAN & RENDER
+    function renderTabel() {
+      const q = document.getElementById('cariData').value.toLowerCase();
+      const k = document.getElementById('filterKelas').value;
+      const tbody = document.getElementById('tabelSiswa');
 
-    function populateKelasDropdowns() {
-      const modalSelect = document.getElementById('siswaKelasSelect');
-      const filterSelect = document.getElementById('filterKelasSelect');
-
-      let modalOptions = `<option value="">-- Pilih Kelas --</option>`;
-      cacheKelasList.forEach(k => {
-        modalOptions += `<option value="${k}">${k}</option>`;
+      const hasil = dbSiswa.filter(s => {
+        const matchKata = s.nama.toLowerCase().includes(q) || s.nis.toLowerCase().includes(q) || s.rfid_uid.toLowerCase().includes(q);
+        const matchKelas = k === "" || s.kelas === k;
+        return matchKata && matchKelas;
       });
-      modalOptions += `<option value="__CUSTOM__">+ Tambah Kelas Lain...</option>`;
-      modalSelect.innerHTML = modalOptions;
 
-      let filterOptions = `<option value="">Semua Kelas</option>`;
-      cacheKelasList.forEach(k => {
-        filterOptions += `<option value="${k}">${k}</option>`;
-      });
-      filterSelect.innerHTML = filterOptions;
-    }
+      if(hasil.length === 0) return tbody.innerHTML = `<tr><td colspan="6" class="text-center py-3">Data tidak ditemukan.</td></tr>`;
 
-    function toggleCustomKelasInput(val) {
-      const customInput = document.getElementById('siswaKelasCustom');
-      if (val === '__CUSTOM__') {
-        customInput.classList.remove('d-none');
-        customInput.required = true;
-      } else {
-        customInput.classList.add('d-none');
-        customInput.required = false;
-      }
-    }
-
-    // FETCH & RENDER TABEL SISWA
-    async function loadSiswa() {
-      const tbody = document.getElementById('tabelSiswaBody');
-      const errBox = document.getElementById('errorNoticeBox');
-
-      try {
-        const res = await fetch('/api/siswa');
-        const json = await res.json();
-
-        if (!res.ok || json.success === false) {
-          errBox.className = "alert alert-danger fw-bold mb-4";
-          errBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation me-2"></i><strong>Gagal Load Database:</strong> ${json.message || 'Koneksi Turso bermasalah'}`;
-          tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">Gagal memuat data. Silakan tekan tombol "Reset / Perbaiki Tabel" di kanan atas.</td></tr>`;
-          return;
-        }
-
-        errBox.className = "d-none";
-        
-        // Ambil data siswa dari respon array/object
-        cacheSiswaList = json.data || json.siswa || json.students || (Array.isArray(json) ? json : []);
-        document.getElementById('totalSiswaCount').innerText = cacheSiswaList.length;
-
-        renderTabelSiswa();
-      } catch (err) {
-        errBox.className = "alert alert-danger fw-bold mb-4";
-        errBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation me-2"></i><strong>Gagal Koneksi API:</strong> ${err.message}`;
-        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">Gagal terhubung ke API: ${err.message}</td></tr>`;
-      }
-    }
-
-    function renderTabelSiswa() {
-      const tbody = document.getElementById('tabelSiswaBody');
-      const filterKelas = document.getElementById('filterKelasSelect').value;
-
-      let list = cacheSiswaList;
-      if (filterKelas) {
-        list = list.filter(s => String(s.kelas).trim() === filterKelas);
-      }
-
-      if (cacheSiswaList.length === 0) {
-        tbody.innerHTML = `
-          <tr>
-            <td colspan="6" class="text-center text-dark py-4">
-              Data siswa di database masih kosong.<br>
-              <div class="mt-2 d-flex justify-content-center gap-2">
-                <button class="btn btn-sm btn-primary fw-bold" onclick="bukaModalTambah()"><i class="fa-solid fa-plus me-1"></i> Tambah Manual</button>
-                <button class="btn btn-sm btn-success fw-bold" onclick="isiDataSample()"><i class="fa-solid fa-bolt me-1"></i> Isi 4 Data Contoh</button>
-              </div>
-            </td>
-          </tr>`;
-        return;
-      }
-
-      if (list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">Tidak ada siswa di kelas '${filterKelas}'</td></tr>`;
-        return;
-      }
-
-      tbody.innerHTML = list.map((s, idx) => `
+      tbody.innerHTML = hasil.map((s, i) => `
         <tr>
-          <td class="text-center fw-bold">${idx + 1}</td>
-          <td class="fw-bold">${s.nis || '-'}</td>
-          <td class="fw-bold">${s.nama || '-'}</td>
-          <td><span class="badge bg-secondary">${s.kelas || '-'}</span></td>
-          <td><span class="badge-rfid">${s.rfid_uid || '-'}</span></td>
+          <td class="text-center">${i + 1}</td>
+          <td class="fw-bold">${s.nis}</td>
+          <td>${s.nama}</td>
+          <td><span class="badge bg-secondary">${s.kelas}</span></td>
+          <td><span class="badge-rfid">${s.rfid_uid}</span></td>
           <td class="text-center">
-            <button class="btn btn-warning btn-sm me-1" onclick='editSiswa(${JSON.stringify(s)})' title="Edit">
-              <i class="fa-solid fa-pen-to-square"></i>
-            </button>
-            <button class="btn btn-danger btn-sm" onclick="hapusSiswa('${s.id || s.nis}')" title="Hapus">
-              <i class="fa-solid fa-trash"></i>
-            </button>
+            <button class="btn btn-warning btn-sm" onclick='editSiswa(${JSON.stringify(s)})'><i class="fa-solid fa-pen"></i></button>
+            <button class="btn btn-danger btn-sm" onclick="hapusSiswa(${s.id})"><i class="fa-solid fa-trash"></i></button>
           </td>
         </tr>
       `).join('');
     }
 
-    // ISI DATA CONTOH
-    async function isiDataSample() {
-      try {
-        const res = await fetch('/api/siswa/seed', { method: 'POST' });
-        const json = await res.json();
-        if (json.success) {
-          alert("4 Data siswa contoh berhasil ditambahkan!");
-          loadSemuaData();
-        } else {
-          alert("Gagal: " + json.message);
-        }
-      } catch (err) {
-        alert("Error: " + err.message);
-      }
+    function renderRiwayat(hist) {
+      const tb = document.getElementById('tabelRiwayat');
+      if(!hist.length) return tb.innerHTML = `<tr><td class="text-center text-muted">Belum ada absen</td></tr>`;
+      tb.innerHTML = hist.slice(0, 5).map(h => `<tr><td class="fw-bold">${h.nama}</td><td>${h.kelas}</td></tr>`).join('');
     }
 
-    // FETCH REKAP PRESENSI
-    async function loadAbsensi() {
-      const tbody = document.getElementById('tabelAbsensiBody');
-      try {
-        const res = await fetch('/api/absensi');
-        const json = await res.json();
-
-        let list = json.data || json.absensi || [];
-        document.getElementById('totalAbsenCount').innerText = list.length;
-
-        if (list.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted py-3">Belum ada rekap presensi</td></tr>`;
-          return;
-        }
-
-        tbody.innerHTML = list.slice(0, 5).map(a => `
-          <tr>
-            <td class="fw-bold">${a.nama || '-'}</td>
-            <td>${a.kelas || '-'}</td>
-            <td class="small text-muted">${a.waktu ? String(a.waktu).split('.')[0] : '-'}</td>
-          </tr>
-        `).join('');
-
-      } catch (err) {
-        console.error("Gagal load absensi:", err);
-      }
-    }
-
-    // MODAL TAMBAH & EDIT SISWA
-    function bukaModalTambah() {
-      document.getElementById('modalTitle').innerText = "Tambah Siswa Baru";
-      document.getElementById('formSiswa').reset();
-      document.getElementById('siswaId').value = "";
-      document.getElementById('siswaKelasSelect').value = "";
-      toggleCustomKelasInput("");
-      modalInstance.show();
+    function bukaModal() {
+      document.getElementById('modalTitle').innerText = "Tambah Siswa";
+      document.getElementById('sId').value = "";
+      document.getElementById('sNis').value = "";
+      document.getElementById('sNama').value = "";
+      document.getElementById('sKelas').value = "";
+      document.getElementById('sRfid').value = "";
+      modalApp.show();
     }
 
     function editSiswa(s) {
-      document.getElementById('modalTitle').innerText = "Edit Data Siswa";
-      document.getElementById('siswaId').value = s.id || s.nis || "";
-      document.getElementById('siswaNis').value = s.nis || "";
-      document.getElementById('siswaNama').value = s.nama || "";
-      document.getElementById('siswaRfid').value = s.rfid_uid || "";
-
-      const select = document.getElementById('siswaKelasSelect');
-      const kelasVal = s.kelas || "";
-
-      if (cacheKelasList.includes(kelasVal)) {
-        select.value = kelasVal;
-        toggleCustomKelasInput(kelasVal);
-      } else if (kelasVal) {
-        select.value = "__CUSTOM__";
-        toggleCustomKelasInput("__CUSTOM__");
-        document.getElementById('siswaKelasCustom').value = kelasVal;
-      } else {
-        select.value = "";
-        toggleCustomKelasInput("");
-      }
-
-      modalInstance.show();
+      document.getElementById('modalTitle').innerText = "Edit Siswa";
+      document.getElementById('sId').value = s.id;
+      document.getElementById('sNis').value = s.nis;
+      document.getElementById('sNama').value = s.nama;
+      document.getElementById('sKelas').value = s.kelas;
+      document.getElementById('sRfid').value = s.rfid_uid;
+      modalApp.show();
     }
 
-    // SIMPAN/UPDATE SISWA
     async function simpanSiswa(e) {
       e.preventDefault();
-      const id = document.getElementById('siswaId').value;
-      const btn = document.getElementById('btnSimpan');
-      
-      const selectVal = document.getElementById('siswaKelasSelect').value;
-      const customVal = document.getElementById('siswaKelasCustom').value.trim();
-      const finalKelas = (selectVal === '__CUSTOM__') ? customVal : selectVal;
-
-      if (!finalKelas) {
-        alert("Silakan pilih atau isi Kelas terlebih dahulu!");
-        return;
-      }
-
       const payload = {
-        id: id,
-        nis: document.getElementById('siswaNis').value.trim(),
-        nama: document.getElementById('siswaNama').value.trim(),
-        kelas: finalKelas,
-        rfid_uid: document.getElementById('siswaRfid').value.trim()
+        id: document.getElementById('sId').value,
+        nis: document.getElementById('sNis').value,
+        nama: document.getElementById('sNama').value,
+        kelas: document.getElementById('sKelas').value,
+        rfid_uid: document.getElementById('sRfid').value
       };
 
-      try {
-        btn.disabled = true;
-        btn.innerText = "Saving...";
-
-        const url = id ? `/api/siswa/${id}` : '/api/siswa';
-        const method = id ? 'PUT' : 'POST';
-
-        const res = await fetch(url, {
-          method: method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        const json = await res.json();
-        
-        if (res.ok && json.success) {
-          alert(json.message || "Data siswa berhasil disimpan!");
-          modalInstance.hide();
-          loadSemuaData();
-        } else {
-          alert("Gagal menyimpan data: " + (json.message || "Terjadi kesalahan server"));
-        }
-      } catch (err) {
-        alert("Error Koneksi: " + err.message);
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = `<i class="fa-solid fa-save me-1"></i> Simpan Data`;
-      }
+      const res = await fetch('/api/siswa', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+      const data = await res.json();
+      if(data.success) { modalApp.hide(); loadSemua(); }
+      else alert(data.message);
     }
 
-    // HAPUS SISWA
     async function hapusSiswa(id) {
-      if (!confirm("Apakah Anda yakin ingin menghapus data siswa ini?")) return;
-
-      try {
-        const res = await fetch(`/api/siswa/${id}`, { method: 'DELETE' });
-        const json = await res.json();
-
-        if (json.success) {
-          alert(json.message || "Siswa berhasil dihapus!");
-          loadSemuaData();
-        } else {
-          alert("Gagal menghapus: " + json.message);
-        }
-      } catch (err) {
-        alert("Error: " + err.message);
-      }
+      if(!confirm("Hapus siswa ini?")) return;
+      await fetch(`/api/siswa/${id}`, { method: 'DELETE' });
+      loadSemua();
     }
 
-    // TAP RFID SIMULATOR
-    async function prosesTapRfid(e) {
+    async function tapKartu(e) {
       e.preventDefault();
-      const input = document.getElementById('tapRfidInput');
-      const alertBox = document.getElementById('tapResultAlert');
-      const rfid_uid = input.value.trim();
-
-      if (!rfid_uid) return;
-
-      try {
-        const res = await fetch('/api/tap', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rfid_uid })
-        });
-
-        const json = await res.json();
-
-        if (res.ok && json.success) {
-          alertBox.innerHTML = `<div class="alert alert-success fw-bold text-center mb-0"><i class="fa-solid fa-check-circle me-1"></i> ${json.message}</div>`;
-          input.value = '';
-          loadAbsensi();
-        } else {
-          alertBox.innerHTML = `<div class="alert alert-danger fw-bold text-center mb-0"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${json.message || 'Kartu RFID tidak terdaftar'}</div>`;
-        }
-      } catch (err) {
-        alertBox.innerHTML = `<div class="alert alert-warning text-center mb-0">Error koneksi: ${err.message}</div>`;
-      }
+      const el = document.getElementById('tapInput');
+      const res = await fetch('/api/tap', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ rfid_uid: el.value }) });
+      const data = await res.json();
+      alert(data.message);
+      el.value = "";
+      loadSemua();
+      el.focus();
     }
   </script>
 </body>
